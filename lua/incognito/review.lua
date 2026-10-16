@@ -21,7 +21,7 @@ end
 
 local function have_snacks()
     if Snacks == nil then
-        vim.notify("MR review: snacks.nvim is required for pickers", vim.log.levels.ERROR)
+        vim.notify("Incognito: snacks.nvim is required for pickers", vim.log.levels.ERROR)
         return false
     end
     return true
@@ -39,7 +39,7 @@ end
 local function merge_base(target, root)
     local base, err = git({ "merge-base", target, "HEAD" }, root)
     if not base then
-        vim.notify("MR review: " .. (err or "merge-base failed"), vim.log.levels.ERROR)
+        vim.notify("Incognito: " .. (err or "merge-base failed"), vim.log.levels.ERROR)
     end
     return base
 end
@@ -52,7 +52,7 @@ local function state_path(root)
     if state_paths[root] == nil then
         local dir = vim.uv.fs_stat(vim.fs.joinpath(root, ".git"))
             and git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, root)
-        state_paths[root] = dir and vim.fs.joinpath(dir, "mr-review.json") or false
+        state_paths[root] = dir and vim.fs.joinpath(dir, "incognito.json") or false
     end
     return state_paths[root] or nil
 end
@@ -68,23 +68,23 @@ local function load_state(root)
     end
     -- Keep the broken file for the user instead of overwriting it later.
     vim.uv.fs_rename(path, path .. ".bad")
-    vim.notify("MR review: " .. path .. " is not valid JSON, moved to " .. path .. ".bad", vim.log.levels.ERROR)
+    vim.notify("Incognito: " .. path .. " is not valid JSON, moved to " .. path .. ".bad", vim.log.levels.ERROR)
     return {}
 end
 
 local function save_state(root, state)
     local path = state_path(root)
     if not path then
-        return vim.notify("MR review: " .. root .. " is not a git repository", vim.log.levels.ERROR)
+        return vim.notify("Incognito: " .. root .. " is not a git repository", vim.log.levels.ERROR)
     end
     -- Write and rename, so a crash never leaves half a file behind.
     local tmp = path .. ".tmp"
     if vim.fn.writefile({ vim.json.encode(state) }, tmp) ~= 0 then
-        return vim.notify("MR review: cannot write " .. tmp, vim.log.levels.ERROR)
+        return vim.notify("Incognito: cannot write " .. tmp, vim.log.levels.ERROR)
     end
     local ok, err = vim.uv.fs_rename(tmp, path)
     if not ok then
-        vim.notify("MR review: " .. err, vim.log.levels.ERROR)
+        vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
     end
 end
 
@@ -216,7 +216,7 @@ local function warn_stale_commit_mode(root)
         return
     end
     stale_warned = true
-    vim.notify("MR review: HEAD is still detached by an earlier commit mode, run `git checkout "
+    vim.notify("Incognito: HEAD is still detached by an earlier commit mode, run `git checkout "
         .. saved.ref .. "`", vim.log.levels.WARN)
 end
 
@@ -235,7 +235,7 @@ function M.on(target)
     local base, name = change_base(target)
     if base then
         require("gitsigns").toggle_linehl(true)
-        vim.notify("MR review: diffing against " .. name)
+        vim.notify("Incognito: diffing against " .. name)
     end
 end
 
@@ -248,8 +248,8 @@ function M.on_structural(target)
         local gs = require("gitsigns")
         gs.toggle_linehl(false)
         gs.toggle_signs(false)
-        require("mrview.structdiff").enable(base)
-        vim.notify("MR review (structural): diffing against " .. name)
+        require("incognito.structdiff").enable(base)
+        vim.notify("Incognito (structural): diffing against " .. name)
     end
 end
 
@@ -271,12 +271,12 @@ end
 -- or uncommitted when HEAD starts moving.
 local function can_enter(root)
     if git({ "status", "--porcelain", "--untracked-files=no" }, root) ~= "" then
-        vim.notify("MR review: commit the changes in the working tree first", vim.log.levels.ERROR)
+        vim.notify("Incognito: commit the changes in the working tree first", vim.log.levels.ERROR)
         return false
     end
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
         if vim.bo[bufnr].modified and vim.bo[bufnr].buftype == "" then
-            vim.notify("MR review: save the modified buffers first", vim.log.levels.ERROR)
+            vim.notify("Incognito: save the modified buffers first", vim.log.levels.ERROR)
             return false
         end
     end
@@ -286,7 +286,7 @@ end
 -- Move gitsigns (for every buffer when `global`) and, if on, structdiff to `base`.
 local function move_base(base, global)
     require("gitsigns").change_base(base, global)
-    local sd = require("mrview.structdiff")
+    local sd = require("incognito.structdiff")
     if sd.active() then
         sd.enable(base)
     end
@@ -297,14 +297,14 @@ local function show_commit(index)
     local commit = mode.commits[index]
     local _, err = git({ "checkout", "--quiet", "--detach", commit.sha }, mode.root)
     if err then
-        vim.notify("MR review: " .. err, vim.log.levels.ERROR)
+        vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
         return false
     end
     mode.index = index
     mode.base = git({ "rev-parse", commit.sha .. "^" }, mode.root)
     vim.cmd.checktime()
     move_base(mode.base, true)
-    vim.notify(("MR review: %d/%d %s %s"):format(index, #mode.commits, commit.short, commit.subject))
+    vim.notify(("Incognito: %d/%d %s %s"):format(index, #mode.commits, commit.short, commit.subject))
     return true
 end
 
@@ -317,7 +317,7 @@ local function enter_commit_mode(root, ref, commits, index)
     end
     update_state(root, COMMIT_KEY, { ref = ref, root = root })
     vim.api.nvim_create_autocmd("VimLeavePre", {
-        group = vim.api.nvim_create_augroup("mr_review", { clear = true }),
+        group = vim.api.nvim_create_augroup("incognito", { clear = true }),
         callback = function()
             if commit_mode then
                 git({ "checkout", "--quiet", commit_mode.ref }, commit_mode.root)
@@ -325,7 +325,7 @@ local function enter_commit_mode(root, ref, commits, index)
         end,
     })
     -- Without a review mode on, fall back to the gitsigns one.
-    if not require("mrview.structdiff").active() then
+    if not require("incognito.structdiff").active() then
         require("gitsigns").toggle_linehl(true)
     end
 end
@@ -343,7 +343,7 @@ function M.commits()
         return
     end
     if #commits == 0 then
-        return vim.notify("MR review: no commits on top of " .. resolve_target(root), vim.log.levels.WARN)
+        return vim.notify("Incognito: no commits on top of " .. resolve_target(root), vim.log.levels.WARN)
     end
 
     local items = {}
@@ -386,11 +386,11 @@ end
 --- Step to the next (1) or previous (-1) commit in commit mode.
 function M.step_commit(delta)
     if not commit_mode then
-        return vim.notify("MR review: commit mode is off, enter it from the MR commits picker", vim.log.levels.WARN)
+        return vim.notify("Incognito: commit mode is off, enter it from the MR commits picker", vim.log.levels.WARN)
     end
     local index = commit_mode.index + delta
     if index < 1 or index > #commit_mode.commits then
-        return vim.notify("MR review: no more commits", vim.log.levels.INFO)
+        return vim.notify("Incognito: no more commits", vim.log.levels.INFO)
     end
     show_commit(index)
 end
@@ -405,7 +405,7 @@ function M.set_base()
     Snacks.picker.git_branches({
         all = true,
         cwd = root,
-        title = "MR review base",
+        title = "Incognito: review base",
         win = { input = { keys = { ["<c-a>"] = false, ["<c-x>"] = false } } },
         confirm = function(picker, item)
             local typed = vim.trim(picker:filter().search)
@@ -415,7 +415,7 @@ function M.set_base()
                 return
             end
             if not git({ "rev-parse", "--verify", "--quiet", rev }, root) then
-                return vim.notify("MR review: unknown revision " .. rev, vim.log.levels.ERROR)
+                return vim.notify("Incognito: unknown revision " .. rev, vim.log.levels.ERROR)
             end
             update_state(root, BASE_KEY, rev)
             M.on(rev)
@@ -429,19 +429,19 @@ function M.off()
         local _, err = git({ "checkout", "--quiet", commit_mode.ref }, root)
         if err then
             -- Stay in commit mode: the ref to return to is still needed.
-            return vim.notify("MR review: " .. err, vim.log.levels.ERROR)
+            return vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
         end
         commit_mode = nil
-        vim.api.nvim_clear_autocmds({ group = "mr_review" })
+        vim.api.nvim_clear_autocmds({ group = "incognito" })
         update_state(root, COMMIT_KEY, nil)
         vim.cmd.checktime()
     end
-    require("mrview.structdiff").disable()
+    require("incognito.structdiff").disable()
     local gs = require("gitsigns")
     gs.change_base(nil, true)
     gs.toggle_linehl(false)
     gs.toggle_signs(true)
-    vim.notify("MR review: off")
+    vim.notify("Incognito: off")
 end
 
 --- Mark files as reviewed at their present content (true) or unmark them (false).
@@ -468,7 +468,7 @@ function M.toggle_reviewed(target)
     target = target or resolve_target(root)
     local file = rel_path(root)
     if not file then
-        return vim.notify("MR review: current buffer is not a file in " .. root, vim.log.levels.WARN)
+        return vim.notify("Incognito: current buffer is not a file in " .. root, vim.log.levels.WARN)
     end
 
     -- Only a current mark (✓) is taken back; a stale (~) or unknown (?) one
@@ -476,7 +476,7 @@ function M.toggle_reviewed(target)
     -- one just did.
     local on = reviewed_status(root, target, { file })[file] ~= "✓"
     set_reviewed(root, target, { [file] = on })
-    vim.notify("MR review: " .. file .. (on and " reviewed" or " unmarked"))
+    vim.notify("Incognito: " .. file .. (on and " reviewed" or " unmarked"))
 end
 
 function M.since_review(target)
@@ -486,17 +486,17 @@ function M.since_review(target)
     local mark = file and mark_of(load_state(root)[target] or {}, file)
     local sha = mark and mark.head
     if not sha then
-        return vim.notify("MR review: " .. (file or "buffer") .. " was never reviewed", vim.log.levels.WARN)
+        return vim.notify("Incognito: " .. (file or "buffer") .. " was never reviewed", vim.log.levels.WARN)
     end
 
     move_base(sha, false)
-    vim.notify("MR review: showing changes since your review")
+    vim.notify("Incognito: showing changes since your review")
 end
 
 local function changed_items(base, root)
     local out, err = git({ "diff", "--name-status", "-z", base }, root)
     if not out then
-        return vim.notify("MR review: " .. (err or "diff failed"), vim.log.levels.ERROR)
+        return vim.notify("Incognito: " .. (err or "diff failed"), vim.log.levels.ERROR)
     end
     -- Status, then the path; renames and copies give the old path first.
     local fields = vim.split(out, "\0", { trimempty = true })
@@ -516,7 +516,7 @@ end
 -- difft as git's external diff engine: one process for the whole MR, and git
 -- handles renames and new files for us.
 local function difft_env(extra)
-    local cmd = require("mrview.structdiff").config.difft_cmd
+    local cmd = require("incognito.structdiff").config.difft_cmd
     return vim.tbl_extend("force", { GIT_EXTERNAL_DIFF = cmd, DFT_UNSTABLE = "yes" }, extra)
 end
 
@@ -561,7 +561,7 @@ function M.files(target)
 
     -- In structural mode the list and the preview follow difft: files that
     -- only changed formatting are kept, but dimmed, so nothing disappears.
-    local structural = require("mrview.structdiff").active()
+    local structural = require("incognito.structdiff").active()
     local semantic = {}
 
     local picker = Snacks.picker.pick({

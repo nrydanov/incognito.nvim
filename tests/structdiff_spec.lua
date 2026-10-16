@@ -1,5 +1,5 @@
 local h = require("tests.helpers")
-local sd = require("mrview.structdiff")
+local sd = require("incognito.structdiff")
 
 local M = {}
 
@@ -230,7 +230,7 @@ function M.test_reenable_keeps_split_pane()
     end
     h.assert_eq(pane_marks(), 1, "pane drawn after toggle")
 
-    sd.enable("HEAD") -- mr_review re-targets the base this way
+    sd.enable("HEAD") -- review re-targets the base this way
     h.wait_run(bufnr)
     h.assert_eq(pane_marks(), 1, "pane survives enable")
     h.assert_eq(vim.wo.wrap, false, "wrap stays off")
@@ -337,7 +337,7 @@ function M.test_mr_files_structural_status_classifies_files()
     vim.system({ "git", "add", "-N", "fresh.lua" }, { cwd = dir }):wait()
 
     local got
-    require("mrview.review").structural_status("HEAD", dir, function(status)
+    require("incognito.review").structural_status("HEAD", dir, function(status)
         got = status
     end)
     assert(vim.wait(3000, function()

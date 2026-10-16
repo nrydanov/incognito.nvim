@@ -1,18 +1,18 @@
-*mrview.txt*  Review a merge request in ordinary buffers
+*incognito.txt*  Review a merge request in ordinary buffers
 
 ==============================================================================
-CONTENTS                                                     *mrview*
+CONTENTS                                                     *incognito*
 
-  1. Introduction ............................ |mrview-intro|
-  2. Commands ................................ |mrview-commands|
-  3. Configuration ........................... |mrview-config|
-  4. Highlights .............................. |mrview-highlights|
-  5. Limitations ............................. |mrview-limitations|
+  1. Introduction ............................ |incognito-intro|
+  2. Commands ................................ |incognito-commands|
+  3. Configuration ........................... |incognito-config|
+  4. Highlights .............................. |incognito-highlights|
+  5. Limitations ............................. |incognito-limitations|
 
 ==============================================================================
-1. INTRODUCTION                                              *mrview-intro*
+1. INTRODUCTION                                              *incognito-intro*
 
-mrview points gitsigns at the merge-base of the current branch and the MR
+incognito points gitsigns at the merge-base of the current branch and the MR
 target, so the changed lines of the MR are marked in normal buffers. In
 structural mode the marks come from difftastic (`difft --display=json`):
 lines that changed only in formatting are dimmed, deleted lines are shown as
@@ -22,13 +22,13 @@ Reviewed marks and the chosen target are stored in a JSON file in the git
 common directory.
 
 Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
-0.70 or 0.71 (structural mode). Run |:checkhealth| `mrview`.
+0.70 or 0.71 (structural mode). Run |:checkhealth| `incognito`.
 
 ==============================================================================
-2. COMMANDS                                                  *mrview-commands*
+2. COMMANDS                                                  *incognito-commands*
 
-                                                             *:MRView*
-:MRView {sub} [target]
+                                                             *:Incognito*
+:Incognito {sub} [target]
 
   on          Review against the merge-base with the target.
   structural  Same, with difftastic signs.
@@ -48,23 +48,23 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
 
 `on`, `structural`, `files`, `reviewed` and `since` take an optional target.
 
-Lua functions with the same actions: `require("mrview").on()`,
+Lua functions with the same actions: `require("incognito").on()`,
 `structural()`, `off()`, `base()`, `files()`, `commits()`, `next_commit()`,
 `prev_commit()`, `toggle_reviewed()`, `since_review()`,
 `nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
 
 ==============================================================================
-3. CONFIGURATION                                             *mrview-config*
+3. CONFIGURATION                                             *incognito-config*
 
 `setup()` is optional. Defaults: >lua
-    require("mrview").setup({
+    require("incognito").setup({
         remote = "origin",
         targets = { "main", "master" },
         difft = { cmd = "difft", debounce_ms = 300 },
     })
 <
 ==============================================================================
-4. HIGHLIGHTS                                                *mrview-highlights*
+4. HIGHLIGHTS                                                *incognito-highlights*
 
   StructDiffFormat        Lines changed only in formatting (NonText)
   StructDiffAddInline     Added tokens (DiffAdd)
@@ -74,7 +74,7 @@ Lua functions with the same actions: `require("mrview").on()`,
 Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 
 ==============================================================================
-5. LIMITATIONS                                               *mrview-limitations*
+5. LIMITATIONS                                               *incognito-limitations*
 
 - difftastic JSON output is unstable and needs `DFT_UNSTABLE=yes`.
 - Commit mode checks out commits with a detached HEAD and refuses to start

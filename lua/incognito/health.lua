@@ -26,7 +26,7 @@ local function check_difft_json(cmd)
 end
 
 function M.check()
-    vim.health.start("mrview")
+    vim.health.start("incognito")
     if vim.fn.has("nvim-0.11") == 1 then
         vim.health.ok("Neovim " .. tostring(vim.version()))
     else
@@ -44,8 +44,8 @@ function M.check()
         vim.health.warn("snacks.nvim not found: files and commits pickers are unavailable")
     end
 
-    vim.health.start("mrview: difftastic (structural mode)")
-    local cmd = require("mrview").config.difft.cmd
+    vim.health.start("incognito: difftastic (structural mode)")
+    local cmd = require("incognito").config.difft.cmd
     if vim.fn.executable(cmd) ~= 1 then
         return vim.health.error(cmd .. " not found in PATH")
     end

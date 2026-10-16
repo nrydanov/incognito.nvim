@@ -1,8 +1,8 @@
 -- Self-contained init for the test harness:
 --   nvim --headless --clean -u tests/minimal_init.lua -l tests/run.lua
--- Dependencies are looked up in $MRVIEW_DEPS (default: lazy.nvim's install dir).
+-- Dependencies are looked up in $INCOGNITO_DEPS (default: lazy.nvim's install dir).
 local root = vim.fs.dirname(vim.fs.dirname(vim.fs.normalize(debug.getinfo(1, "S").source:sub(2))))
-local deps = vim.env.MRVIEW_DEPS or vim.fs.joinpath(vim.fn.stdpath("data"), "lazy")
+local deps = vim.env.INCOGNITO_DEPS or vim.fs.joinpath(vim.fn.stdpath("data"), "lazy")
 
 vim.opt.rtp:prepend(root)
 -- `require("tests.helpers")` resolves against the plugin root from any cwd.
@@ -30,7 +30,7 @@ if ok_gs then
         on_attach = function(bufnr)
             -- Same routing as the README recipe; integration specs press ]g/[g.
             local function nav(dir)
-                local sd = require("mrview.structdiff")
+                local sd = require("incognito.structdiff")
                 if sd.active() then sd.nav(dir) else gitsigns.nav_hunk(dir) end
             end
             for key, dir in pairs({ ["]g"] = "next", ["[g"] = "prev" }) do

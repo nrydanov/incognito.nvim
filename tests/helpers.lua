@@ -39,7 +39,7 @@ end
 
 --- Open `name` from `dir`, enable structdiff against HEAD and wait for marks.
 function M.open(dir, name)
-    local sd = require("mrview.structdiff")
+    local sd = require("incognito.structdiff")
     sd.disable()
     sd.toggle_deleted(false) -- every test starts from the default
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, name)))
@@ -50,7 +50,7 @@ function M.open(dir, name)
 end
 
 function M.wait_run(bufnr)
-    local sd = require("mrview.structdiff")
+    local sd = require("incognito.structdiff")
     local before = sd._generation(bufnr)
     assert(vim.wait(3000, function()
         return sd._generation(bufnr) > before
