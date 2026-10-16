@@ -2,8 +2,14 @@ local M = {}
 
 function M.assert_eq(actual, expected, message)
     if not vim.deep_equal(actual, expected) then
-        error((message or "assert_eq failed") .. "\nexpected: " .. vim.inspect(expected)
-            .. "\nactual: " .. vim.inspect(actual), 2)
+        error(
+            (message or "assert_eq failed")
+                .. "\nexpected: "
+                .. vim.inspect(expected)
+                .. "\nactual: "
+                .. vim.inspect(actual),
+            2
+        )
     end
 end
 
@@ -52,9 +58,12 @@ end
 function M.wait_run(bufnr)
     local sd = require("incognito.structdiff")
     local before = sd._generation(bufnr)
-    assert(vim.wait(3000, function()
-        return sd._generation(bufnr) > before
-    end, 20), "difft run did not finish")
+    assert(
+        vim.wait(3000, function()
+            return sd._generation(bufnr) > before
+        end, 20),
+        "difft run did not finish"
+    )
 end
 
 --- Signs by line: { [lnum] = "Add" | "Change" | "Delete" | "Format" }, inline

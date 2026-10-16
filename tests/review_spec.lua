@@ -20,8 +20,11 @@ function M.test_mark_follows_file_content()
 
     review.toggle_reviewed("HEAD")
     h.assert_eq(status(dir), "✓")
-    h.assert_eq(vim.uv.fs_stat(vim.fs.joinpath(dir, ".git", "incognito.json")) ~= nil, true,
-        "state lives in the git dir")
+    h.assert_eq(
+        vim.uv.fs_stat(vim.fs.joinpath(dir, ".git", "incognito.json")) ~= nil,
+        true,
+        "state lives in the git dir"
+    )
 
     h.write(dir, "a.lua", "local a = 2\n")
     h.assert_eq(status(dir), "~", "uncommitted edit makes the mark stale")

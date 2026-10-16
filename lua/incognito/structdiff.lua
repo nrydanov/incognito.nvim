@@ -498,9 +498,13 @@ function M.refresh(bufnr)
     end
     state.bufs[bufnr] = state.bufs[bufnr] or { timer = vim.uv.new_timer() }
     -- Restarting the one timer of the buffer is the debounce.
-    state.bufs[bufnr].timer:start(M.config.debounce_ms, 0, vim.schedule_wrap(function()
-        run(bufnr)
-    end))
+    state.bufs[bufnr].timer:start(
+        M.config.debounce_ms,
+        0,
+        vim.schedule_wrap(function()
+            run(bufnr)
+        end)
+    )
 end
 
 local function detach(bufnr)

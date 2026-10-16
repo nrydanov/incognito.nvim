@@ -216,8 +216,10 @@ local function warn_stale_commit_mode(root)
         return
     end
     stale_warned = true
-    vim.notify("Incognito: HEAD is still detached by an earlier commit mode, run `git checkout "
-        .. saved.ref .. "`", vim.log.levels.WARN)
+    vim.notify(
+        "Incognito: HEAD is still detached by an earlier commit mode, run `git checkout " .. saved.ref .. "`",
+        vim.log.levels.WARN
+    )
 end
 
 -- Point gitsigns at the review base; returns the base and its name.
@@ -358,7 +360,10 @@ function M.commits()
             local c = commits[item.index]
             local current = commit_mode and commit_mode.index == item.index
             return {
-                { ("%d/%d"):format(item.index, #commits), current and "SnacksPickerGitBranchCurrent" or "SnacksPickerComment" },
+                {
+                    ("%d/%d"):format(item.index, #commits),
+                    current and "SnacksPickerGitBranchCurrent" or "SnacksPickerComment",
+                },
                 { " " },
                 { c.short, "SnacksPickerGitCommit" },
                 { " " },
