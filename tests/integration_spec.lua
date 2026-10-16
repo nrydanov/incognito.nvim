@@ -21,9 +21,12 @@ local function open_sample()
     h.write(dir, "a.lua", REFLOWED)
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
     local bufnr = vim.api.nvim_get_current_buf()
-    assert(vim.wait(5000, function()
-        return vim.b[bufnr].gitsigns_head ~= nil and gitsigns_signs(bufnr) > 0
-    end, 50), "gitsigns did not attach")
+    assert(
+        vim.wait(5000, function()
+            return vim.b[bufnr].gitsigns_head ~= nil and gitsigns_signs(bufnr) > 0
+        end, 50),
+        "gitsigns did not attach"
+    )
     return bufnr
 end
 
@@ -48,9 +51,12 @@ function M.test_gd_silences_gitsigns_and_draws_structdiff()
     local bufnr = open_sample()
     mr.on_structural("HEAD")
     h.wait_run(bufnr)
-    assert(vim.wait(2000, function()
-        return gitsigns_signs(bufnr) == 0
-    end, 50), "gitsigns signs should be gone")
+    assert(
+        vim.wait(2000, function()
+            return gitsigns_signs(bufnr) == 0
+        end, 50),
+        "gitsigns signs should be gone"
+    )
 
     h.assert_eq(gs_config.linehl, false)
     h.assert_eq(gs_config.signcolumn, false)
@@ -66,9 +72,12 @@ function M.test_gM_restores_gitsigns_after_either_mode()
     mr.on_structural("HEAD")
     h.wait_run(bufnr)
     mr.off()
-    assert(vim.wait(2000, function()
-        return gitsigns_signs(bufnr) > 0
-    end, 50), "gitsigns signs should be back")
+    assert(
+        vim.wait(2000, function()
+            return gitsigns_signs(bufnr) > 0
+        end, 50),
+        "gitsigns signs should be back"
+    )
 
     h.assert_eq(gs_config.linehl, false)
     h.assert_eq(gs_config.signcolumn, true)

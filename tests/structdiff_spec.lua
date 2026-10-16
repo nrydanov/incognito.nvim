@@ -340,9 +340,12 @@ function M.test_mr_files_structural_status_classifies_files()
     require("incognito.review").structural_status("HEAD", dir, function(status)
         got = status
     end)
-    assert(vim.wait(3000, function()
-        return got ~= nil
-    end), "structural_status did not call back")
+    assert(
+        vim.wait(3000, function()
+            return got ~= nil
+        end),
+        "structural_status did not call back"
+    )
 
     h.assert_eq(got, {
         ["fmt.lua"] = "unchanged",

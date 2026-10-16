@@ -9,8 +9,11 @@ local function check_difft_json(cmd)
     vim.fn.writefile({ "local x = 1" }, a)
     vim.fn.writefile({ "local x = 2" }, b)
     local ok, res = pcall(function()
-        return vim.system({ cmd, "--display=json", "--color=never", a, b },
-            { text = true, env = { DFT_UNSTABLE = "yes" } }):wait(5000)
+        return vim.system(
+            { cmd, "--display=json", "--color=never", a, b },
+            { text = true, env = { DFT_UNSTABLE = "yes" } }
+        )
+            :wait(5000)
     end)
     vim.fn.delete(dir, "rf")
     if not ok then
@@ -20,8 +23,10 @@ local function check_difft_json(cmd)
     if decoded_ok and type(decoded) == "table" and decoded.chunks then
         vim.health.ok("difft --display=json returns chunks")
     else
-        vim.health.error("difft --display=json output has no chunks (DFT_UNSTABLE=yes is required)",
-            { vim.trim(res.stderr or ""), (res.stdout or ""):sub(1, 200) })
+        vim.health.error(
+            "difft --display=json output has no chunks (DFT_UNSTABLE=yes is required)",
+            { vim.trim(res.stderr or ""), (res.stdout or ""):sub(1, 200) }
+        )
     end
 end
 

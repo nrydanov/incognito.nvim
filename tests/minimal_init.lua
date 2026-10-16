@@ -31,10 +31,16 @@ if ok_gs then
             -- Same routing as the README recipe; integration specs press ]g/[g.
             local function nav(dir)
                 local sd = require("incognito.structdiff")
-                if sd.active() then sd.nav(dir) else gitsigns.nav_hunk(dir) end
+                if sd.active() then
+                    sd.nav(dir)
+                else
+                    gitsigns.nav_hunk(dir)
+                end
             end
             for key, dir in pairs({ ["]g"] = "next", ["[g"] = "prev" }) do
-                vim.keymap.set("n", key, function() nav(dir) end, { buffer = bufnr })
+                vim.keymap.set("n", key, function()
+                    nav(dir)
+                end, { buffer = bufnr })
             end
         end,
     })
