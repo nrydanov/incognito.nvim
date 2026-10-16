@@ -16,6 +16,9 @@ end
 
 --- Open the sample file and wait until gitsigns has attached and drawn.
 local function open_sample()
+    -- Wipe the previous repo's buffers first: gitsigns changes the base
+    -- asynchronously across every attached buffer.
+    vim.cmd("silent! %bwipeout!")
     mr.off()
     local dir = h.repo({ ["a.lua"] = BASE })
     h.write(dir, "a.lua", REFLOWED)
