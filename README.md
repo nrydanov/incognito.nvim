@@ -84,7 +84,7 @@ require("gitsigns").setup({
 | `on`         | Review against the merge-base with the target (gitsigns signs) |
 | `structural` | Same, with difftastic signs                                    |
 | `off`        | Leave review mode, restore gitsigns                            |
-| `base`       | Pick the target branch or commit                               |
+| `base`       | Pick the target branch; typed text is taken as a revision      |
 | `files`      | Picker of changed files with reviewed marks                    |
 | `commits`    | Picker of MR commits; selecting one enters commit mode         |
 | `next`       | Next commit in commit mode                                     |

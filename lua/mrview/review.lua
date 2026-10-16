@@ -414,65 +414,30 @@ function M.step_commit(delta)
     show_commit(index)
 end
 
---- Refs (branches, remotes, tags), then the last commits of HEAD as HEAD~k.
-local function base_items(root)
-    local items = {}
-    local function add(rev, subject)
-        items[#items + 1] = { text = rev .. " " .. subject, rev = rev, subject = subject, cwd = root }
-    end
-
-    local refs = git({ "for-each-ref", "--format=%(refname)%09%(refname:short)%09%(subject)",
-        "refs/heads", "refs/remotes", "refs/tags" }, root) or ""
-    for _, line in ipairs(vim.split(refs, "\n", { trimempty = true })) do
-        local full, short, subject = line:match("^([^\t]*)\t([^\t]*)\t?(.*)$")
-        if full and not full:match("/HEAD$") then
-            add(short, subject)
-        end
-    end
-
-    local log = git({ "log", "-n", "20", "--skip=1", "--format=%s", "HEAD" }, root) or ""
-    for k, subject in ipairs(vim.split(log, "\n", { trimempty = true })) do
-        add("HEAD~" .. k, subject)
-    end
-    return items
-end
-
+--- Branch picker for the review base. Typed text that matches no branch is
+--- taken as a revision, so `HEAD~1` or a hash work as well.
 function M.set_base()
     if not have_snacks() then
         return
     end
     local root = repo_root()
-    Snacks.picker.pick({
-        source = "mr_base",
+    Snacks.picker.git_branches({
+        all = true,
+        cwd = root,
         title = "MR review base",
-        items = base_items(root),
-        format = function(item)
-            return { { item.rev, "SnacksPickerGitBranch" }, { " " }, { item.subject, "SnacksPickerComment" } }
-        end,
-        preview = function(ctx)
-            Snacks.picker.preview.cmd(
-                { "git", "--no-pager", "log", "--oneline", "--decorate", "-n", "30", ctx.item.rev },
-                ctx,
-                { ft = "git" }
-            )
-        end,
+        win = { input = { keys = { ["<c-a>"] = false, ["<c-x>"] = false } } },
         confirm = function(picker, item)
-            -- Nothing matched: take the typed text as a revision, e.g. a hash.
             local typed = vim.trim(picker:filter().search)
             picker:close()
-            local branch = item and item.rev
-            if not branch and typed ~= "" then
-                if not git({ "rev-parse", "--verify", "--quiet", typed }, root) then
-                    vim.notify("MR review: unknown revision " .. typed, vim.log.levels.ERROR)
-                    return
-                end
-                branch = typed
-            end
-            if not branch then
+            local rev = item and (item.branch or item.commit) or typed
+            if rev == "" then
                 return
             end
-            store_target(root, branch)
-            M.on(branch)
+            if not git({ "rev-parse", "--verify", "--quiet", rev }, root) then
+                return vim.notify("MR review: unknown revision " .. rev, vim.log.levels.ERROR)
+            end
+            store_target(root, rev)
+            M.on(rev)
         end,
     })
 end
