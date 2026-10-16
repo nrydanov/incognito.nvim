@@ -33,7 +33,8 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
   on          Review against the merge-base with the target.
   structural  Same, with difftastic signs.
   off         Leave review mode.
-  base        Pick the target branch or commit.
+  base        Pick the target branch. Text that matches no branch is
+              taken as a revision, e.g. HEAD~1 or a hash.
   files       Picker of changed files with reviewed marks (✓ reviewed,
               ~ changed since marked).
   commits     Picker of MR commits; selecting one enters commit mode,
