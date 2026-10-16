@@ -1,0 +1,87 @@
+*mrview.txt*  Review a merge request in ordinary buffers
+
+==============================================================================
+CONTENTS                                                     *mrview*
+
+  1. Introduction ............................ |mrview-intro|
+  2. Commands ................................ |mrview-commands|
+  3. Configuration ........................... |mrview-config|
+  4. Highlights .............................. |mrview-highlights|
+  5. Limitations ............................. |mrview-limitations|
+
+==============================================================================
+1. INTRODUCTION                                              *mrview-intro*
+
+mrview points gitsigns at the merge-base of the current branch and the MR
+target, so the changed lines of the MR are marked in normal buffers. In
+structural mode the marks come from difftastic (`difft --display=json`):
+lines that changed only in formatting are dimmed, deleted lines are shown as
+virtual lines, and a side-by-side pane shows the base version.
+
+Reviewed marks, the chosen target and queued comments are stored in a JSON
+file in the git common directory. Comments are not uploaded anywhere.
+
+Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
+0.70 or 0.71 (structural mode). Run |:checkhealth| `mrview`.
+
+==============================================================================
+2. COMMANDS                                                  *mrview-commands*
+
+                                                             *:MRView*
+:MRView {sub} [target]
+
+  on          Review against the merge-base with the target.
+  structural  Same, with difftastic signs.
+  off         Leave review mode.
+  base        Pick the target branch or commit.
+  files       Picker of changed files with reviewed marks (✓ reviewed,
+              ~ changed since marked).
+  commits     Picker of MR commits; selecting one enters commit mode,
+              which detaches HEAD at that commit.
+  next        Next commit in commit mode.
+  prev        Previous commit in commit mode.
+  reviewed    Toggle the reviewed mark of the current file.
+  since       Diff the current file against the commit it was reviewed at.
+  comment     Queue a comment on the cursor line or [range].
+  comments    Picker of queued comments.
+  deleted     Toggle deleted lines (structural mode).
+  split       Toggle the side-by-side base pane (structural mode).
+
+`on`, `structural`, `files`, `reviewed` and `since` take an optional target.
+
+Lua functions with the same actions: `require("mrview").on()`,
+`structural()`, `off()`, `base()`, `files()`, `commits()`, `next_commit()`,
+`prev_commit()`, `toggle_reviewed()`, `since_review()`, `comment()`,
+`comments()`, `nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
+
+==============================================================================
+3. CONFIGURATION                                             *mrview-config*
+
+`setup()` is optional. Defaults: >lua
+    require("mrview").setup({
+        remote = "origin",
+        targets = { "main", "master" },
+        difft = { cmd = "difft", debounce_ms = 300 },
+        signs = { comment = "c" },
+    })
+<
+==============================================================================
+4. HIGHLIGHTS                                                *mrview-highlights*
+
+  StructDiffFormat        Lines changed only in formatting (NonText)
+  StructDiffAddInline     Added tokens (DiffAdd)
+  StructDiffChangeInline  Changed tokens (DiffAdd)
+  StructDiffDeleteInline  Deleted tokens (DiffDelete)
+  MRComment               Queued comment sign (DiagnosticInfo)
+
+Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
+
+==============================================================================
+5. LIMITATIONS                                               *mrview-limitations*
+
+- difftastic JSON output is unstable and needs `DFT_UNSTABLE=yes`.
+- Commit mode checks out commits with a detached HEAD and refuses to start
+  while tracked files have uncommitted changes.
+- No forge integration.
+
+ vim:tw=78:ts=8:ft=help:norl:
