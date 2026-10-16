@@ -41,7 +41,7 @@ function M.check()
     if pcall(require, "snacks") then
         vim.health.ok("snacks.nvim found")
     else
-        vim.health.warn("snacks.nvim not found: files, commits and comments pickers are unavailable")
+        vim.health.warn("snacks.nvim not found: files and commits pickers are unavailable")
     end
 
     vim.health.start("mrview: difftastic (structural mode)")

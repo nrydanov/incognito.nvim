@@ -12,14 +12,13 @@ your usual motions, instead of a dedicated diff UI.
   `~` changed since it was marked.
 - Commit mode steps through the MR one commit at a time by detaching HEAD
   at each commit.
-- Review comments are queued locally. Nothing is uploaded to GitHub or GitLab.
 
 ## Requirements
 
 - Neovim >= 0.11
 - [gitsigns.nvim](https://github.com/lewis6991/gitsigns.nvim)
-- [snacks.nvim](https://github.com/folke/snacks.nvim) for the files, commits
-  and comments pickers
+- [snacks.nvim](https://github.com/folke/snacks.nvim) for the files and
+  commits pickers
 - `difft` (difftastic) on `PATH` for structural mode; tested with 0.70 and 0.71
 
 Run `:checkhealth mrview` to check them.
@@ -44,8 +43,6 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
         { "[C", function() require("mrview").prev_commit() end, desc = "MR previous commit" },
         { "<leader>gv", function() require("mrview").toggle_reviewed() end, desc = "MR toggle reviewed" },
         { "<leader>gV", function() require("mrview").since_review() end, desc = "MR diff since review" },
-        { "<leader>gc", function() require("mrview").comment() end, mode = { "n", "v" }, desc = "MR comment" },
-        { "<leader>gC", function() require("mrview").comments() end, desc = "MR pending comments" },
     },
 }
 ```
@@ -94,15 +91,11 @@ require("gitsigns").setup({
 | `prev`       | Previous commit in commit mode                                 |
 | `reviewed`   | Toggle the reviewed mark of the current file                   |
 | `since`      | Diff the current file against the commit it was reviewed at    |
-| `comment`    | Queue a comment on the cursor line or the range                |
-| `comments`   | Picker of queued comments                                      |
 | `deleted`    | Toggle deleted lines (structural mode)                         |
 | `split`      | Toggle the side-by-side base pane (structural mode)            |
-| `migrate`    | Import marks and comments from the pre-plugin state file       |
 
 `on`, `structural`, `files`, `reviewed` and `since` accept an optional target
-(for example `:MRView on origin/develop`). `comment` accepts a range:
-`:'<,'>MRView comment`.
+(for example `:MRView on origin/develop`).
 
 ## Configuration
 
@@ -115,9 +108,6 @@ require("mrview").setup({
     difft = {
         cmd = "difft",
         debounce_ms = 300,           -- delay before rerunning difft after an edit
-    },
-    signs = {
-        comment = "c",               -- sign text on lines with a queued comment
     },
 })
 ```
@@ -132,7 +122,6 @@ require("mrview").setup({
 | `StructDiffAddInline`    | `DiffAdd`        | Added tokens                             |
 | `StructDiffChangeInline` | `DiffAdd`        | Changed tokens                           |
 | `StructDiffDeleteInline` | `DiffDelete`     | Deleted tokens in virtual lines and pane |
-| `MRComment`              | `DiagnosticInfo` | Queued comment sign                      |
 
 Line signs in structural mode reuse the `GitSignsAdd`, `GitSignsChange` and
 `GitSignsDelete` groups.
@@ -141,8 +130,8 @@ Line signs in structural mode reuse the `GitSignsAdd`, `GitSignsChange` and
 
 The review base is `git merge-base HEAD <target>`, where the target is
 `<remote>/HEAD` or the first existing name from `targets`. gitsigns is pointed
-at that base with `change_base`. Reviewed marks, the chosen target and queued
-comments are kept in a JSON state file in the git common directory, so they
+at that base with `change_base`. Reviewed marks and the chosen target are
+kept in a JSON state file in the git common directory, so they
 are shared between worktrees and are not tracked by git. In structural mode
 each buffer is compared with its base version by `difft --display=json`, and
 the chunks are turned into signs, inline highlights and virtual lines.
@@ -154,7 +143,7 @@ the chunks are turned into signs, inline highlights and virtual lines.
 - Commit mode checks out each commit with a detached HEAD, so it refuses to
   start while tracked files have uncommitted changes. If Neovim exits during
   commit mode, HEAD stays detached until you check the branch out again.
-- There is no forge integration: comments stay local.
+- There is no forge integration.
 
 ## Comparison
 
