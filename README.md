@@ -98,6 +98,7 @@ require("gitsigns").setup({
 | `comments`   | Picker of queued comments                                      |
 | `deleted`    | Toggle deleted lines (structural mode)                         |
 | `split`      | Toggle the side-by-side base pane (structural mode)            |
+| `migrate`    | Import marks and comments from the pre-plugin state file       |
 
 `on`, `structural`, `files`, `reviewed` and `since` accept an optional target
 (for example `:MRView on origin/develop`). `comment` accepts a range:
