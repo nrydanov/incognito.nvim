@@ -27,8 +27,9 @@ local function have_snacks()
     return true
 end
 
-local function git(args, cwd)
-    local res = vim.system(vim.list_extend({ "git", "--no-pager" }, args), { cwd = cwd, text = true }):wait()
+local function git(args, cwd, stdin)
+    local opts = { cwd = cwd, text = true, stdin = stdin }
+    local res = vim.system(vim.list_extend({ "git", "--no-pager" }, args), opts):wait()
     if res.code ~= 0 then
         return nil, vim.trim(res.stderr or "")
     end
@@ -39,7 +40,6 @@ local function merge_base(target, root)
     local base, err = git({ "merge-base", target, "HEAD" }, root)
     if not base then
         vim.notify("MR review: " .. (err or "merge-base failed"), vim.log.levels.ERROR)
-        return nil
     end
     return base
 end
@@ -62,8 +62,7 @@ local function load_state(root)
     if not path or not vim.uv.fs_stat(path) then
         return {}
     end
-    local content = table.concat(vim.fn.readfile(path), "\n")
-    local ok, decoded = pcall(vim.json.decode, content)
+    local ok, decoded = pcall(vim.json.decode, table.concat(vim.fn.readfile(path), "\n"))
     if ok and type(decoded) == "table" then
         return decoded
     end
@@ -76,14 +75,12 @@ end
 local function save_state(root, state)
     local path = state_path(root)
     if not path then
-        vim.notify("MR review: " .. root .. " is not a git repository", vim.log.levels.ERROR)
-        return
+        return vim.notify("MR review: " .. root .. " is not a git repository", vim.log.levels.ERROR)
     end
     -- Write and rename, so a crash never leaves half a file behind.
     local tmp = path .. ".tmp"
     if vim.fn.writefile({ vim.json.encode(state) }, tmp) ~= 0 then
-        vim.notify("MR review: cannot write " .. tmp, vim.log.levels.ERROR)
-        return
+        return vim.notify("MR review: cannot write " .. tmp, vim.log.levels.ERROR)
     end
     local ok, err = vim.uv.fs_rename(tmp, path)
     if not ok then
@@ -101,10 +98,9 @@ local function detect_target(root)
     if head then
         return head
     end
-    local candidates = {}
-    for _, name in ipairs(targets) do
-        candidates[#candidates + 1] = remote .. "/" .. name
-    end
+    local candidates = vim.tbl_map(function(name)
+        return remote .. "/" .. name
+    end, targets)
     for _, name in ipairs(vim.list_extend(candidates, targets)) do
         if git({ "rev-parse", "--verify", "--quiet", name }, root) then
             return name
@@ -118,15 +114,14 @@ local function resolve_target(root)
     if type(saved) == "string" then
         return saved
     end
-    if not target_cache[root] then
-        target_cache[root] = detect_target(root)
-    end
+    target_cache[root] = target_cache[root] or detect_target(root)
     return target_cache[root]
 end
 
-local function store_target(root, target)
+-- Set one top-level key of the state file.
+local function update_state(root, key, value)
     local state = load_state(root)
-    state[BASE_KEY] = target
+    state[key] = value
     save_state(root, state)
 end
 
@@ -134,10 +129,7 @@ end
 -- taken when it was marked. Old marks were just the HEAD sha.
 local function mark_of(marks, file)
     local mark = marks[file]
-    if type(mark) == "string" then
-        return { head = mark }
-    end
-    return mark
+    return type(mark) == "string" and { head = mark } or mark
 end
 
 --- Blob ids of the working-tree files (not HEAD: an uncommitted edit after
@@ -151,16 +143,9 @@ local function blob_ids(root, files)
         end
     end
     local ids = {}
-    if #present == 0 then
-        return ids
-    end
-    local res = vim.system({ "git", "hash-object", "--stdin-paths" },
-        { cwd = root, text = true, stdin = table.concat(present, "\n") .. "\n" }):wait()
-    if res.code == 0 then
-        local out = vim.split(res.stdout, "\n", { trimempty = true })
-        for i, file in ipairs(present) do
-            ids[file] = out[i]
-        end
+    local out = #present > 0 and git({ "hash-object", "--stdin-paths" }, root, table.concat(present, "\n") .. "\n")
+    for i, id in ipairs(out and vim.split(out, "\n") or {}) do
+        ids[present[i]] = id
     end
     return ids
 end
@@ -222,14 +207,12 @@ local function warn_stale_commit_mode(root)
     if commit_mode or stale_warned then
         return
     end
-    local state = load_state(root)
-    local saved = state[COMMIT_KEY]
+    local saved = load_state(root)[COMMIT_KEY]
     if type(saved) ~= "table" or type(saved.ref) ~= "string" then
         return
     end
     if git({ "symbolic-ref", "-q", "HEAD" }, root) then
-        state[COMMIT_KEY] = nil -- HEAD is back on a branch
-        save_state(root, state)
+        update_state(root, COMMIT_KEY, nil) -- HEAD is back on a branch
         return
     end
     stale_warned = true
@@ -237,38 +220,37 @@ local function warn_stale_commit_mode(root)
         .. saved.ref .. "`", vim.log.levels.WARN)
 end
 
-function M.on(target)
+-- Point gitsigns at the review base; returns the base and its name.
+local function change_base(target)
     local root = repo_root()
-    warn_stale_commit_mode(root)
-    target = target or resolve_target(root)
-    local base, name = current_base(root, target)
-    if not base then
-        return
+    local base, name = current_base(root, target or resolve_target(root))
+    if base then
+        require("gitsigns").change_base(base, true)
     end
+    return base, name
+end
 
-    local gs = require("gitsigns")
-    gs.change_base(base, true)
-    gs.toggle_linehl(true)
-    vim.notify("MR review: diffing against " .. name)
+function M.on(target)
+    warn_stale_commit_mode(repo_root())
+    local base, name = change_base(target)
+    if base then
+        require("gitsigns").toggle_linehl(true)
+        vim.notify("MR review: diffing against " .. name)
+    end
 end
 
 --- Same as `on`, but marks come from difftastic: lines that only changed
 --- formatting stay clean. gitsigns keeps the base for stage/reset, its own
 --- signs go quiet so the two don't disagree in the sign column.
 function M.on_structural(target)
-    local root = repo_root()
-    target = target or resolve_target(root)
-    local base, name = current_base(root, target)
-    if not base then
-        return
+    local base, name = change_base(target)
+    if base then
+        local gs = require("gitsigns")
+        gs.toggle_linehl(false)
+        gs.toggle_signs(false)
+        require("mrview.structdiff").enable(base)
+        vim.notify("MR review (structural): diffing against " .. name)
     end
-
-    local gs = require("gitsigns")
-    gs.change_base(base, true)
-    gs.toggle_linehl(false)
-    gs.toggle_signs(false)
-    require("mrview.structdiff").enable(base)
-    vim.notify("MR review (structural): diffing against " .. name)
 end
 
 local function mr_commits(root)
@@ -301,6 +283,15 @@ local function can_enter(root)
     return true
 end
 
+-- Move gitsigns (for every buffer when `global`) and, if on, structdiff to `base`.
+local function move_base(base, global)
+    require("gitsigns").change_base(base, global)
+    local sd = require("mrview.structdiff")
+    if sd.active() then
+        sd.enable(base)
+    end
+end
+
 local function show_commit(index)
     local mode = assert(commit_mode)
     local commit = mode.commits[index]
@@ -312,12 +303,7 @@ local function show_commit(index)
     mode.index = index
     mode.base = git({ "rev-parse", commit.sha .. "^" }, mode.root)
     vim.cmd.checktime()
-
-    require("gitsigns").change_base(mode.base, true)
-    local sd = require("mrview.structdiff")
-    if sd.active() then
-        sd.enable(mode.base)
-    end
+    move_base(mode.base, true)
     vim.notify(("MR review: %d/%d %s %s"):format(index, #mode.commits, commit.short, commit.subject))
     return true
 end
@@ -329,9 +315,7 @@ local function enter_commit_mode(root, ref, commits, index)
         commit_mode = nil
         return
     end
-    local state = load_state(root)
-    state[COMMIT_KEY] = { ref = ref, root = root }
-    save_state(root, state)
+    update_state(root, COMMIT_KEY, { ref = ref, root = root })
     vim.api.nvim_create_autocmd("VimLeavePre", {
         group = vim.api.nvim_create_augroup("mr_review", { clear = true }),
         callback = function()
@@ -359,8 +343,7 @@ function M.commits()
         return
     end
     if #commits == 0 then
-        vim.notify("MR review: no commits on top of " .. resolve_target(root), vim.log.levels.WARN)
-        return
+        return vim.notify("MR review: no commits on top of " .. resolve_target(root), vim.log.levels.WARN)
     end
 
     local items = {}
@@ -403,13 +386,11 @@ end
 --- Step to the next (1) or previous (-1) commit in commit mode.
 function M.step_commit(delta)
     if not commit_mode then
-        vim.notify("MR review: commit mode is off, enter it from the MR commits picker", vim.log.levels.WARN)
-        return
+        return vim.notify("MR review: commit mode is off, enter it from the MR commits picker", vim.log.levels.WARN)
     end
     local index = commit_mode.index + delta
     if index < 1 or index > #commit_mode.commits then
-        vim.notify("MR review: no more commits", vim.log.levels.INFO)
-        return
+        return vim.notify("MR review: no more commits", vim.log.levels.INFO)
     end
     show_commit(index)
 end
@@ -436,7 +417,7 @@ function M.set_base()
             if not git({ "rev-parse", "--verify", "--quiet", rev }, root) then
                 return vim.notify("MR review: unknown revision " .. rev, vim.log.levels.ERROR)
             end
-            store_target(root, rev)
+            update_state(root, BASE_KEY, rev)
             M.on(rev)
         end,
     })
@@ -448,14 +429,11 @@ function M.off()
         local _, err = git({ "checkout", "--quiet", commit_mode.ref }, root)
         if err then
             -- Stay in commit mode: the ref to return to is still needed.
-            vim.notify("MR review: " .. err, vim.log.levels.ERROR)
-            return
+            return vim.notify("MR review: " .. err, vim.log.levels.ERROR)
         end
         commit_mode = nil
         vim.api.nvim_clear_autocmds({ group = "mr_review" })
-        local state = load_state(root)
-        state[COMMIT_KEY] = nil
-        save_state(root, state)
+        update_state(root, COMMIT_KEY, nil)
         vim.cmd.checktime()
     end
     require("mrview.structdiff").disable()
@@ -466,14 +444,18 @@ function M.off()
     vim.notify("MR review: off")
 end
 
---- Mark `files` as reviewed at their present content, or unmark them.
-local function set_reviewed(root, target, files, reviewed)
-    local head = reviewed and git({ "rev-parse", "HEAD" }, root)
-    local ids = reviewed and blob_ids(root, files) or {}
+--- Mark files as reviewed at their present content (true) or unmark them (false).
+--- @param reviewed table<string, boolean>
+local function set_reviewed(root, target, reviewed)
+    if vim.tbl_isempty(reviewed) then
+        return
+    end
+    local head = git({ "rev-parse", "HEAD" }, root)
+    local ids = blob_ids(root, vim.tbl_keys(reviewed))
     local state = load_state(root)
     state[target] = state[target] or {}
-    for _, file in ipairs(files) do
-        state[target][file] = reviewed and { blob = ids[file], head = head } or nil
+    for file, on in pairs(reviewed) do
+        state[target][file] = on and { blob = ids[file], head = head } or nil
     end
     if vim.tbl_isempty(state[target]) then
         state[target] = nil
@@ -486,20 +468,15 @@ function M.toggle_reviewed(target)
     target = target or resolve_target(root)
     local file = rel_path(root)
     if not file then
-        vim.notify("MR review: current buffer is not a file in " .. root, vim.log.levels.WARN)
-        return
+        return vim.notify("MR review: current buffer is not a file in " .. root, vim.log.levels.WARN)
     end
 
     -- Only a current mark (✓) is taken back; a stale (~) or unknown (?) one
     -- is refreshed to the present content, since re-reading the file is what
     -- one just did.
-    if reviewed_status(root, target, { file })[file] == "✓" then
-        set_reviewed(root, target, { file }, false)
-        vim.notify("MR review: " .. file .. " unmarked")
-    else
-        set_reviewed(root, target, { file }, true)
-        vim.notify("MR review: " .. file .. " reviewed")
-    end
+    local on = reviewed_status(root, target, { file })[file] ~= "✓"
+    set_reviewed(root, target, { [file] = on })
+    vim.notify("MR review: " .. file .. (on and " reviewed" or " unmarked"))
 end
 
 function M.since_review(target)
@@ -509,36 +486,27 @@ function M.since_review(target)
     local mark = file and mark_of(load_state(root)[target] or {}, file)
     local sha = mark and mark.head
     if not sha then
-        vim.notify("MR review: " .. (file or "buffer") .. " was never reviewed", vim.log.levels.WARN)
-        return
+        return vim.notify("MR review: " .. (file or "buffer") .. " was never reviewed", vim.log.levels.WARN)
     end
 
-    require("gitsigns").change_base(sha, false)
-    local sd = require("mrview.structdiff")
-    if sd.active() then
-        sd.enable(sha)
-    end
+    move_base(sha, false)
     vim.notify("MR review: showing changes since your review")
 end
 
 local function changed_items(base, root)
     local out, err = git({ "diff", "--name-status", "-z", base }, root)
     if not out then
-        vim.notify("MR review: " .. (err or "diff failed"), vim.log.levels.ERROR)
-        return nil
+        return vim.notify("MR review: " .. (err or "diff failed"), vim.log.levels.ERROR)
     end
-
+    -- Status, then the path; renames and copies give the old path first.
     local fields = vim.split(out, "\0", { trimempty = true })
     local items, files = {}, {}
     local i = 1
     while i < #fields do
-        local status, file = fields[i], fields[i + 1]
-        i = i + 2
-        local kind = status:sub(1, 1)
-        if kind == "R" or kind == "C" then
-            file = fields[i]
-            i = i + 1
-        end
+        local kind = fields[i]:sub(1, 1)
+        local paths = (kind == "R" or kind == "C") and 2 or 1
+        local file = fields[i + paths]
+        i = i + 1 + paths
         items[#items + 1] = { cwd = root, file = file, text = file, status = " " .. kind }
         files[#files + 1] = file
     end
@@ -617,39 +585,21 @@ function M.files(target)
             return vim.list_extend(ret, rest)
         end,
         preview = function(ctx)
-            if structural then
-                Snacks.picker.preview.cmd(
-                    { "git", "--no-pager", "diff", base, "--", ctx.item.file },
-                    ctx,
-                    { env = difft_env({ DFT_DISPLAY = "inline", DFT_COLOR = "always" }) }
-                )
-                return
-            end
-            Snacks.picker.preview.cmd(
-                { "git", "--no-pager", "diff", "--no-ext-diff", base, "--", ctx.item.file },
-                ctx,
-                { ft = "diff" }
-            )
+            -- `git diff` runs GIT_EXTERNAL_DIFF unless told --no-ext-diff.
+            local ext = structural and "--ext-diff" or "--no-ext-diff"
+            local opts = structural and { env = difft_env({ DFT_DISPLAY = "inline", DFT_COLOR = "always" }) }
+                or { ft = "diff" }
+            Snacks.picker.preview.cmd({ "git", "--no-pager", "diff", ext, base, "--", ctx.item.file }, ctx, opts)
         end,
         actions = {
             toggle_reviewed = function(picker)
-                local selected = picker:selected({ fallback = true })
-
                 -- Toggle each file on its own: current marks (✓) come off,
                 -- stale (~), unknown (?) and missing ones get the present content.
-                local to_mark, to_unmark = {}, {}
-                for _, item in ipairs(selected) do
-                    local bucket = status[item.file] == "✓" and to_unmark or to_mark
-                    bucket[#bucket + 1] = item.file
+                local reviewed = {}
+                for _, item in ipairs(picker:selected({ fallback = true })) do
+                    reviewed[item.file] = status[item.file] ~= "✓"
                 end
-
-                if #to_mark > 0 then
-                    set_reviewed(root, target, to_mark, true)
-                end
-                if #to_unmark > 0 then
-                    set_reviewed(root, target, to_unmark, false)
-                end
-
+                set_reviewed(root, target, reviewed)
                 status = reviewed_status(root, target, files)
                 picker.list:update({ force = true })
             end,

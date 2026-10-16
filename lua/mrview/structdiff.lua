@@ -53,10 +53,7 @@ end
 -- working tree (needs the new path to be tracked, which an MR commit is).
 local function rename_source(rel, dir)
     local out = git({ "diff", "--name-status", "-M", "-z", "--diff-filter=R", state.base }, dir)
-    if not out then
-        return nil
-    end
-    local fields = vim.split(out, "\0", { trimempty = true })
+    local fields = vim.split(out or "", "\0", { trimempty = true })
     for i = 1, #fields - 2, 3 do
         if fields[i + 2] == rel then
             return fields[i + 1]
@@ -98,8 +95,7 @@ end
 
 -- Side by side the line tint goes: the tokens alone carry the difference.
 local function mark_line(bufnr, lnum, kind)
-    local line = lnum - 1
-    vim.api.nvim_buf_set_extmark(bufnr, ns, line, 0, {
+    vim.api.nvim_buf_set_extmark(bufnr, ns, lnum - 1, 0, {
         sign_text = "┃",
         sign_hl_group = "GitSigns" .. kind,
         line_hl_group = not state.split and ("GitSigns" .. kind .. "Ln") or nil,
@@ -124,11 +120,17 @@ local function mark_tokens(bufnr, lnum, kind, changes)
     end
 end
 
+-- Buffer lines as the file holds them: an empty buffer still has one ""
+-- line, but git stores it as zero bytes.
+local function file_lines(bufnr)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    return (#lines == 1 and lines[1] == "") and {} or lines
+end
+
 -- Right-hand line numbers a plain line diff would flag, as a set.
 local function text_changed_lines(bufnr)
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    -- An empty buffer still has one "" line; git stores it as zero bytes.
-    local new = (#lines == 1 and lines[1] == "") and "" or table.concat(lines, "\n") .. "\n"
+    local lines = file_lines(bufnr)
+    local new = #lines == 0 and "" or table.concat(lines, "\n") .. "\n"
     local hunks = vim.diff(state.bufs[bufnr].base_text or "", new, { result_type = "indices" })
     local set = {}
     for _, h in ipairs(hunks or {}) do
@@ -139,12 +141,18 @@ local function text_changed_lines(bufnr)
     return set
 end
 
-local function mark_format_only(bufnr, lnum)
+-- A sign alone, no line highlight: formatting-only lines and deletion stops.
+local function mark_sign(bufnr, lnum, text, hl, priority)
     vim.api.nvim_buf_set_extmark(bufnr, ns, lnum - 1, 0, {
-        sign_text = "┃",
-        sign_hl_group = "StructDiffFormat",
-        priority = 5,
+        sign_text = text,
+        sign_hl_group = hl,
+        priority = priority,
     })
+end
+
+-- A side of an aligned pair is null in the JSON where that side has no line.
+local function present(v)
+    return v ~= nil and v ~= vim.NIL
 end
 
 -- For every deleted base line (0-based), the 1-based buffer line it sits
@@ -153,8 +161,8 @@ local function deletion_anchors(aligned, last)
     local anchors, pending = {}, {}
     for _, pair in ipairs(aligned or {}) do
         local lhs, rhs = pair[1], pair[2]
-        if rhs == vim.NIL or rhs == nil then
-            if lhs ~= vim.NIL and lhs ~= nil then
+        if not present(rhs) then
+            if present(lhs) then
                 pending[#pending + 1] = lhs
             end
         else
@@ -190,15 +198,11 @@ local function base_captures(bufnr)
             local name = query.captures[id]
             if name:sub(1, 1) ~= "_" then
                 local srow, scol, erow, ecol = node:range()
-                for row = srow, erow do
-                    local text = buf.base_lines[row + 1]
-                    if text then
-                        local s = row == srow and scol or 0
-                        local e = row == erow and ecol or #text
-                        local caps = buf.captures[row + 1] or {}
-                        caps[#caps + 1] = { s, e, "@" .. name .. "." .. lang }
-                        buf.captures[row + 1] = caps
-                    end
+                for row = srow, math.min(erow, #buf.base_lines - 1) do
+                    local s = row == srow and scol or 0
+                    local e = row == erow and ecol or #buf.base_lines[row + 1]
+                    buf.captures[row + 1] = buf.captures[row + 1] or {}
+                    table.insert(buf.captures[row + 1], { s, e, "@" .. name .. "." .. lang })
                 end
             end
         end
@@ -211,39 +215,29 @@ end
 -- background) and, where it applies, the syntax group and the token group.
 local function deleted_segments(text, changes, hl, captures)
     hl = hl or "GitSignsDeleteVirtLn"
-    local group = {}
+    -- Per byte: the syntax group and whether difft marked it as removed.
+    local syntax, changed = {}, {}
     for _, cap in ipairs(captures or {}) do
         for i = cap[1] + 1, math.min(cap[2], #text) do
-            group[i] = cap[3]
+            syntax[i] = cap[3]
         end
     end
-    local changed = {}
     for _, ch in ipairs(changes) do
         for i = ch.start + 1, math.min(ch["end"], #text) do
             changed[i] = true
         end
     end
+    -- One chunk per run of bytes that share both.
     local segs, from = {}, 1
-    local function flush(to)
-        if to < from then
-            return
-        end
-        local groups = { hl }
-        if group[from] then
-            groups[#groups + 1] = group[from]
-        end
-        if changed[from] then
-            groups[#groups + 1] = "StructDiffDeleteInline"
-        end
-        segs[#segs + 1] = { text:sub(from, to), groups }
-        from = to + 1
-    end
-    for i = 2, #text do
-        if group[i] ~= group[i - 1] or changed[i] ~= changed[i - 1] then
-            flush(i - 1)
+    for i = 1, #text do
+        if i == #text or syntax[i + 1] ~= syntax[from] or changed[i + 1] ~= changed[from] then
+            local groups = { hl }
+            groups[#groups + 1] = syntax[from]
+            groups[#groups + 1] = changed[from] and "StructDiffDeleteInline" or nil
+            segs[#segs + 1] = { text:sub(from, i), groups }
+            from = i + 1
         end
     end
-    flush(#text)
     if #segs == 0 then
         segs[1] = { "", hl }
     end
@@ -317,16 +311,27 @@ end
 -- a navigation stop with a "▁" sign unless it already carries a bright mark.
 -- The old text of a changed line is shown the same way, right above it, so
 -- a yellow line comes with what it replaced, as in gitsigns.
-local function mark_deletions(bufnr, result, last, marked, lines)
+local function mark_deletions(bufnr, result, last, marked)
     local buf = state.bufs[bufnr]
     local anchors = deletion_anchors(result.aligned_lines, last)
-    local groups, order = {}, {}
+    local tabstop = vim.bo[bufnr].tabstop
+    local left, right = pane_geometry(bufnr)
+    -- anchor -> { {old line (0-based), virtual line}, ... }
+    local groups = {}
+    local function add(anchor, old, changes)
+        local text, caps = buf.base_lines[old + 1], base_captures(bufnr)[old + 1]
+        local virt = deleted_segments(text, changes, state.split and "Normal" or nil, caps)
+        if state.split then
+            local row = { { string.rep(" ", left), "Normal" } }
+            virt = vim.list_extend(row, pane_row(old + 1, virt, right, "Normal", tabstop))
+        end
+        groups[anchor] = groups[anchor] or {}
+        table.insert(groups[anchor], { old, virt })
+    end
     if result.status == "deleted" then
         -- Buffer emptied: difft sends no chunks, every base line is gone.
-        groups[last + 1], order[1] = {}, last + 1
-        for i, text in ipairs(buf.base_lines) do
-            local caps = base_captures(bufnr)[i]
-            groups[last + 1][i] = { i - 1, deleted_segments(text, {}, state.split and "Normal" or nil, caps) }
+        for i = 1, #buf.base_lines do
+            add(last + 1, i - 1, {})
         end
     end
     for _, chunk in ipairs(result.chunks or {}) do
@@ -334,58 +339,28 @@ local function mark_deletions(bufnr, result, last, marked, lines)
             local lhs, rhs = pair.lhs, pair.rhs
             -- In split mode the old text of a changed line lives in the pane.
             if lhs and buf.base_lines[lhs.line_number + 1] and not (rhs and state.split) then
-                local anchor
-                if rhs then
-                    anchor = math.min(rhs.line_number + 1, last + 1)
-                else
-                    anchor = anchors[lhs.line_number] or last + 1
-                end
-                if not groups[anchor] then
-                    groups[anchor] = {}
-                    order[#order + 1] = anchor
-                end
-                local text = buf.base_lines[lhs.line_number + 1]
-                local hl = state.split and "Normal" or nil
-                local caps = base_captures(bufnr)[lhs.line_number + 1]
-                groups[anchor][#groups[anchor] + 1] =
-                    { lhs.line_number, deleted_segments(text, lhs.changes or {}, hl, caps) }
+                local anchor = rhs and math.min(rhs.line_number + 1, last + 1) or anchors[lhs.line_number] or last + 1
+                add(anchor, lhs.line_number, lhs.changes or {})
             end
         end
     end
-    for _, anchor in ipairs(order) do
-        table.sort(groups[anchor], function(a, b)
+    for anchor, items in pairs(groups) do
+        table.sort(items, function(a, b)
             return a[1] < b[1]
         end)
-        local virt = {}
-        local tabstop = vim.bo[bufnr].tabstop
-        local left, right
-        if state.split then
-            left, right = pane_geometry(bufnr)
-        end
-        for _, item in ipairs(groups[anchor]) do
-            if state.split then
-                local row = { { string.rep(" ", left), "Normal" } }
-                virt[#virt + 1] = vim.list_extend(row, pane_row(item[1] + 1, item[2], right, "Normal", tabstop))
-            else
-                virt[#virt + 1] = item[2]
-            end
-        end
         local above = anchor <= last
+        local stop = above and anchor or last
         if state.show_deleted or state.split then
-            vim.api.nvim_buf_set_extmark(bufnr, ns, (above and anchor or last) - 1, 0, {
-                virt_lines = virt,
+            vim.api.nvim_buf_set_extmark(bufnr, ns, stop - 1, 0, {
+                virt_lines = vim.tbl_map(function(item)
+                    return item[2]
+                end, items),
                 virt_lines_above = above,
             })
         end
-        local stop = above and anchor or last
         if not marked[stop] then
             marked[stop] = true
-            lines[#lines + 1] = stop
-            vim.api.nvim_buf_set_extmark(bufnr, ns, stop - 1, 0, {
-                sign_text = "▁",
-                sign_hl_group = "GitSignsDelete",
-                priority = 6,
-            })
+            mark_sign(bufnr, stop, "▁", "GitSignsDelete", 6)
         end
     end
 end
@@ -398,7 +373,7 @@ local function mark_pane(bufnr, result, last)
     local old_of, changes = {}, {}
     for _, pair in ipairs(result.aligned_lines or {}) do
         local lhs, rhs = pair[1], pair[2]
-        if lhs ~= vim.NIL and lhs ~= nil and rhs ~= vim.NIL and rhs ~= nil then
+        if present(lhs) and present(rhs) then
             old_of[rhs + 1] = lhs + 1
         end
     end
@@ -415,10 +390,7 @@ local function mark_pane(bufnr, result, last)
     for lnum = 1, last do
         local old = old_of[lnum]
         local text = old and buf.base_lines[old]
-        local segs = {}
-        if text then
-            segs = deleted_segments(text, changes[old] or {}, "Normal", captures[old])
-        end
+        local segs = text and deleted_segments(text, changes[old] or {}, "Normal", captures[old]) or {}
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum - 1, 0, {
             virt_text = pane_row(text and old or nil, segs, right, "Normal", tabstop),
             virt_text_win_col = left,
@@ -445,14 +417,14 @@ end
 
 local function apply(bufnr, result)
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-    local lines, marked = {}, {}
+    local marked = {} -- set of buffer lines that got a sign
     local last = vim.api.nvim_buf_line_count(bufnr)
     local textual = text_changed_lines(bufnr)
 
     if result.status == "created" or state.bufs[bufnr].base_missing then
         for lnum = 1, last do
             mark_line(bufnr, lnum, "Add")
-            lines[#lines + 1] = lnum
+            marked[lnum] = true
         end
     else
         for _, chunk in ipairs(result.chunks or {}) do
@@ -463,18 +435,17 @@ local function apply(bufnr, result)
                     local kind = pair.lhs and "Change" or "Add"
                     mark_line(bufnr, lnum, kind)
                     mark_tokens(bufnr, lnum, kind, rhs.changes or {})
-                    lines[#lines + 1] = lnum
                     marked[lnum] = true
                     textual[lnum] = nil
                 end
             end
         end
-        mark_deletions(bufnr, result, last, marked, lines)
+        mark_deletions(bufnr, result, last, marked)
         -- Whatever git flagged that difft did not: formatting only. Keeping
         -- these visible (dimly) is what makes a missed real change noticeable.
         for lnum in pairs(textual) do
             if lnum <= last then
-                mark_format_only(bufnr, lnum)
+                mark_sign(bufnr, lnum, "┃", "StructDiffFormat", 5)
             end
         end
     end
@@ -482,6 +453,7 @@ local function apply(bufnr, result)
         mark_pane(bufnr, result, last)
     end
     -- difft emits chunks in its own order; navigation wants buffer order.
+    local lines = vim.tbl_keys(marked)
     table.sort(lines)
     state.bufs[bufnr].hunks = group_hunks(lines)
     state.bufs[bufnr].generation = (state.bufs[bufnr].generation or 0) + 1
@@ -495,11 +467,7 @@ local function run(bufnr)
     if not old then
         return
     end
-    local cur_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    if #cur_lines == 1 and cur_lines[1] == "" then
-        cur_lines = {} -- an empty buffer is an empty file, not one blank line
-    end
-    local new = temp_copy(vim.api.nvim_buf_get_name(bufnr), cur_lines)
+    local new = temp_copy(vim.api.nvim_buf_get_name(bufnr), file_lines(bufnr))
     -- Runs may overlap; only the latest one is allowed to paint.
     local buf = state.bufs[bufnr]
     buf.run_id = (buf.run_id or 0) + 1
@@ -528,13 +496,9 @@ function M.refresh(bufnr)
     if not state.base or vim.api.nvim_buf_get_name(bufnr) == "" or vim.bo[bufnr].buftype ~= "" then
         return
     end
-    local buf = state.bufs[bufnr]
-    if not buf then
-        buf = { timer = vim.uv.new_timer() }
-        state.bufs[bufnr] = buf
-    end
+    state.bufs[bufnr] = state.bufs[bufnr] or { timer = vim.uv.new_timer() }
     -- Restarting the one timer of the buffer is the debounce.
-    buf.timer:start(M.config.debounce_ms, 0, vim.schedule_wrap(function()
+    state.bufs[bufnr].timer:start(M.config.debounce_ms, 0, vim.schedule_wrap(function()
         run(bufnr)
     end))
 end
@@ -660,9 +624,7 @@ end
 
 function M.disable()
     reset()
-    if state.split then
-        M.toggle_split(false)
-    end
+    M.toggle_split(false) -- restores wrap; no buffers left to repaint
     state.base = nil
 end
 
@@ -677,23 +639,15 @@ function M.nav(dir)
         return vim.notify("structdiff: no changes", vim.log.levels.INFO)
     end
     local cur = vim.api.nvim_win_get_cursor(0)[1]
-    local index
-    if dir == "next" then
-        for i, h in ipairs(hunks) do
-            if h.start > cur then
-                index = i
-                break
-            end
+    -- Hunks are sorted: the first one after the cursor, or the last one before.
+    local index = dir == "next" and 1 or #hunks
+    for i, h in ipairs(hunks) do
+        if dir == "next" and h.start > cur then
+            index = i
+            break
+        elseif dir ~= "next" and h.start < cur then
+            index = i
         end
-        index = index or 1
-    else
-        for i = #hunks, 1, -1 do
-            if hunks[i].start < cur then
-                index = i
-                break
-            end
-        end
-        index = index or #hunks
     end
     vim.api.nvim_win_set_cursor(0, { hunks[index].start, 0 })
     vim.api.nvim_echo({ { ("Hunk %d of %d"):format(index, #hunks), "None" } }, false, {})
