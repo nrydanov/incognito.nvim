@@ -18,8 +18,8 @@ structural mode the marks come from difftastic (`difft --display=json`):
 lines that changed only in formatting are dimmed, deleted lines are shown as
 virtual lines, and a side-by-side pane shows the base version.
 
-Reviewed marks, the chosen target and queued comments are stored in a JSON
-file in the git common directory. Comments are not uploaded anywhere.
+Reviewed marks and the chosen target are stored in a JSON file in the git
+common directory.
 
 Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
 0.70 or 0.71 (structural mode). Run |:checkhealth| `mrview`.
@@ -42,19 +42,15 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
   prev        Previous commit in commit mode.
   reviewed    Toggle the reviewed mark of the current file.
   since       Diff the current file against the commit it was reviewed at.
-  comment     Queue a comment on the cursor line or [range].
-  comments    Picker of queued comments.
   deleted     Toggle deleted lines (structural mode).
   split       Toggle the side-by-side base pane (structural mode).
-  migrate     Import marks and comments from the pre-plugin state file
-              (stdpath("state")/mr-review/<slug>.json).
 
 `on`, `structural`, `files`, `reviewed` and `since` take an optional target.
 
 Lua functions with the same actions: `require("mrview").on()`,
 `structural()`, `off()`, `base()`, `files()`, `commits()`, `next_commit()`,
-`prev_commit()`, `toggle_reviewed()`, `since_review()`, `comment()`,
-`comments()`, `nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
+`prev_commit()`, `toggle_reviewed()`, `since_review()`,
+`nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
 
 ==============================================================================
 3. CONFIGURATION                                             *mrview-config*
@@ -64,7 +60,6 @@ Lua functions with the same actions: `require("mrview").on()`,
         remote = "origin",
         targets = { "main", "master" },
         difft = { cmd = "difft", debounce_ms = 300 },
-        signs = { comment = "c" },
     })
 <
 ==============================================================================
@@ -74,7 +69,6 @@ Lua functions with the same actions: `require("mrview").on()`,
   StructDiffAddInline     Added tokens (DiffAdd)
   StructDiffChangeInline  Changed tokens (DiffAdd)
   StructDiffDeleteInline  Deleted tokens (DiffDelete)
-  MRComment               Queued comment sign (DiagnosticInfo)
 
 Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 

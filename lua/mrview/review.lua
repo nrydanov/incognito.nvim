@@ -516,45 +516,6 @@ local function set_reviewed(root, target, files, reviewed)
     save_state(root, state)
 end
 
---- Import the state file of the pre-plugin version, which lived under
---- stdpath("state") keyed by a slug of the repo path and stored marks as
---- the HEAD sha alone. Marks get the blob of the file at that commit, so a
---- file untouched since the review stays current; comments are appended.
---- The old file is renamed to .migrated afterwards.
-function M.migrate(root)
-    root = root or repo_root()
-    local old_path = vim.fs.joinpath(vim.fn.stdpath("state"), "mr-review", (root:gsub("[^%w]", "_")) .. ".json")
-    if not vim.uv.fs_stat(old_path) then
-        return vim.notify("MR review: nothing to migrate for " .. root, vim.log.levels.WARN)
-    end
-    local ok, old = pcall(vim.json.decode, table.concat(vim.fn.readfile(old_path), "\n"))
-    if not ok or type(old) ~= "table" then
-        return vim.notify("MR review: " .. old_path .. " is not valid JSON", vim.log.levels.ERROR)
-    end
-
-    local state = load_state(root)
-    local marks, comments = 0, 0
-    for key, value in pairs(old) do
-        if key == ".comments" then
-            state[key] = vim.list_extend(state[key] or {}, value)
-            comments = #value
-        elseif key:sub(1, 1) == "." then
-            state[key] = state[key] == nil and value or state[key]
-        else
-            state[key] = state[key] or {}
-            for file, sha in pairs(value) do
-                if type(sha) == "string" and not state[key][file] then
-                    state[key][file] = { blob = git({ "rev-parse", "--verify", "--quiet", sha .. ":" .. file }, root), head = sha }
-                    marks = marks + 1
-                end
-            end
-        end
-    end
-    save_state(root, state)
-    vim.uv.fs_rename(old_path, old_path .. ".migrated")
-    vim.notify(("MR review: migrated %d marks and %d comments from %s"):format(marks, comments, old_path))
-end
-
 function M.toggle_reviewed(target)
     local root = repo_root()
     target = target or resolve_target(root)
@@ -744,7 +705,7 @@ function M.files(target)
     end
 end
 
--- Shared with config.mr_comment, which keeps its queue in the same state file.
+-- Exported for tests and for other modules that share the state file.
 M.git = git
 M.repo_root = repo_root
 M.rel_path = rel_path
