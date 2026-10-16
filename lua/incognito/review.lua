@@ -223,11 +223,19 @@ local function warn_stale_commit_mode(root)
 end
 
 -- Point gitsigns at the review base; returns the base and its name.
+-- gitsigns changes the base of every attached buffer, so a buffer from
+-- another repository makes it fail on a revision it does not have.
+local function gitsigns_error(err)
+    if err then
+        vim.notify("Incognito: gitsigns: " .. err, vim.log.levels.ERROR)
+    end
+end
+
 local function change_base(target)
     local root = repo_root()
     local base, name = current_base(root, target or resolve_target(root))
     if base then
-        require("gitsigns").change_base(base, true)
+        require("gitsigns").change_base(base, true, gitsigns_error)
     end
     return base, name
 end
@@ -287,7 +295,7 @@ end
 
 -- Move gitsigns (for every buffer when `global`) and, if on, structdiff to `base`.
 local function move_base(base, global)
-    require("gitsigns").change_base(base, global)
+    require("gitsigns").change_base(base, global, gitsigns_error)
     local sd = require("incognito.structdiff")
     if sd.active() then
         sd.enable(base)
@@ -443,7 +451,7 @@ function M.off()
     end
     require("incognito.structdiff").disable()
     local gs = require("gitsigns")
-    gs.change_base(nil, true)
+    gs.change_base(nil, true, gitsigns_error)
     gs.toggle_linehl(false)
     gs.toggle_signs(true)
     vim.notify("Incognito: off")
