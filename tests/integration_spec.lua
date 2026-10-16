@@ -1,7 +1,7 @@
 -- Runs with the full config: real gitsigns, Snacks and the keymaps.
 local h = require("tests.helpers")
-local mr = require("mrview.review")
-local sd = require("mrview.structdiff")
+local mr = require("incognito.review")
+local sd = require("incognito.structdiff")
 local gs_config = require("gitsigns.config").config
 
 local M = {}
@@ -95,8 +95,8 @@ function M.test_bracket_g_follows_the_active_mode()
 end
 
 function M.test_user_command_lists_subcommands()
-    h.assert_eq(vim.fn.exists(":MRView"), 2, ":MRView is defined")
-    local completions = vim.fn.getcompletion("MRView ", "cmdline")
+    h.assert_eq(vim.fn.exists(":Incognito"), 2, ":Incognito is defined")
+    local completions = vim.fn.getcompletion("Incognito ", "cmdline")
     h.assert_eq(vim.tbl_contains(completions, "structural"), true, "subcommands complete")
 end
 

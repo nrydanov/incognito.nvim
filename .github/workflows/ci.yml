@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DIFFT_VERSION: 0.71.0
-      MRVIEW_DEPS: ${{ github.workspace }}/deps
+      INCOGNITO_DEPS: ${{ github.workspace }}/deps
     steps:
       - uses: actions/checkout@v4
       - uses: rhysd/action-setup-vim@v1
@@ -32,8 +32,8 @@ jobs:
           difft --version
       - name: Clone dependencies
         run: |
-          git clone --depth 1 https://github.com/lewis6991/gitsigns.nvim "$MRVIEW_DEPS/gitsigns.nvim"
-          git clone --depth 1 https://github.com/folke/snacks.nvim "$MRVIEW_DEPS/snacks.nvim"
+          git clone --depth 1 https://github.com/lewis6991/gitsigns.nvim "$INCOGNITO_DEPS/gitsigns.nvim"
+          git clone --depth 1 https://github.com/folke/snacks.nvim "$INCOGNITO_DEPS/snacks.nvim"
       - name: Test
         run: |
           git config --global user.email ci@example.com

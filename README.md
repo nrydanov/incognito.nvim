@@ -1,7 +1,14 @@
-# mrview.nvim
+# incognito.nvim
 
-Review a merge request in ordinary Neovim buffers, with LSP, treesitter and
-your usual motions, instead of a dedicated diff UI.
+> К нам едет ревизор. Инкогнито.
+>
+> An inspector is coming to see us. Incognito.
+>
+> Gogol, *The Government Inspector*, 1836
+
+The review arrives the same way: no review tab, no diff window. You open the
+files of a merge request as you open any file, with LSP and your usual
+motions, and the review is there, in the gutter.
 
 - Line signs come from gitsigns against the merge-base of the MR target.
 - Structural mode asks [difftastic](https://github.com/Wilfred/difftastic)
@@ -21,7 +28,7 @@ your usual motions, instead of a dedicated diff UI.
   commits pickers
 - `difft` (difftastic) on `PATH` for structural mode; tested with 0.70 and 0.71
 
-Run `:checkhealth mrview` to check them.
+Run `:checkhealth incognito` to check them.
 
 ## Install
 
@@ -29,20 +36,20 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-    "<name>/mrview.nvim",
+    "nrydanov/incognito.nvim",
     dependencies = { "lewis6991/gitsigns.nvim", "folke/snacks.nvim" },
     opts = {},
     keys = {
-        { "<leader>gm", function() require("mrview").on() end, desc = "MR review on" },
-        { "<leader>gd", function() require("mrview").structural() end, desc = "MR review on (structural)" },
-        { "<leader>gM", function() require("mrview").off() end, desc = "MR review off" },
-        { "<leader>gb", function() require("mrview").base() end, desc = "MR review base" },
-        { "<leader>gf", function() require("mrview").files() end, desc = "MR changed files" },
-        { "<leader>gk", function() require("mrview").commits() end, desc = "MR commits" },
-        { "]C", function() require("mrview").next_commit() end, desc = "MR next commit" },
-        { "[C", function() require("mrview").prev_commit() end, desc = "MR previous commit" },
-        { "<leader>gv", function() require("mrview").toggle_reviewed() end, desc = "MR toggle reviewed" },
-        { "<leader>gV", function() require("mrview").since_review() end, desc = "MR diff since review" },
+        { "<leader>gm", function() require("incognito").on() end, desc = "MR review on" },
+        { "<leader>gd", function() require("incognito").structural() end, desc = "MR review on (structural)" },
+        { "<leader>gM", function() require("incognito").off() end, desc = "MR review off" },
+        { "<leader>gb", function() require("incognito").base() end, desc = "MR review base" },
+        { "<leader>gf", function() require("incognito").files() end, desc = "MR changed files" },
+        { "<leader>gk", function() require("incognito").commits() end, desc = "MR commits" },
+        { "]C", function() require("incognito").next_commit() end, desc = "MR next commit" },
+        { "[C", function() require("incognito").prev_commit() end, desc = "MR previous commit" },
+        { "<leader>gv", function() require("incognito").toggle_reviewed() end, desc = "MR toggle reviewed" },
+        { "<leader>gV", function() require("incognito").since_review() end, desc = "MR diff since review" },
     },
 }
 ```
@@ -56,7 +63,7 @@ and deleted lines. Route the keys in gitsigns' `on_attach`:
 require("gitsigns").setup({
     on_attach = function(bufnr)
         local gs = require("gitsigns")
-        local sd = require("mrview.structdiff")
+        local sd = require("incognito.structdiff")
         local function map(l, r, desc)
             vim.keymap.set("n", l, r, { buffer = bufnr, desc = desc })
         end
@@ -77,7 +84,7 @@ require("gitsigns").setup({
 
 ## Commands
 
-`:MRView {sub} [target]`
+`:Incognito {sub} [target]`
 
 | Subcommand   | Action                                                         |
 |--------------|----------------------------------------------------------------|
@@ -95,14 +102,14 @@ require("gitsigns").setup({
 | `split`      | Toggle the side-by-side base pane (structural mode)            |
 
 `on`, `structural`, `files`, `reviewed` and `since` accept an optional target
-(for example `:MRView on origin/develop`).
+(for example `:Incognito on origin/develop`).
 
 ## Configuration
 
 Defaults:
 
 ```lua
-require("mrview").setup({
+require("incognito").setup({
     remote = "origin",               -- remote whose HEAD names the target
     targets = { "main", "master" },  -- fallback target names
     difft = {

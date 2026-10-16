@@ -11,7 +11,7 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace("structdiff")
 local group = vim.api.nvim_create_augroup("structdiff", { clear = true })
--- Overridden by require("mrview").setup().
+-- Overridden by require("incognito").setup().
 M.config = { difft_cmd = "difft", debounce_ms = 300 }
 
 -- state.base: commit to diff against

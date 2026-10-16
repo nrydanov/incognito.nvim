@@ -8,7 +8,7 @@ M.config = {
 
 -- Modules load on first use, so this file works before they exist and without setup().
 local function mod(name)
-    return function() return require("mrview." .. name) end
+    return function() return require("incognito." .. name) end
 end
 local review, structdiff = mod("review"), mod("structdiff")
 
@@ -20,7 +20,7 @@ function M.setup(opts)
         structdiff = { difft_cmd = c.difft.cmd, debounce_ms = c.difft.debounce_ms },
     }
     for name, fields in pairs(push) do
-        local ok, m = pcall(require, "mrview." .. name)
+        local ok, m = pcall(require, "incognito." .. name)
         if ok and type(m.config) == "table" then
             for k, v in pairs(fields) do m.config[k] = v end
         end
