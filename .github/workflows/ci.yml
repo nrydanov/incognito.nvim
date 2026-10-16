@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  stylua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: JohnnyMorganz/stylua-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: v2.6.0
+          args: --check lua plugin tests
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DIFFT_VERSION: 0.71.0
+      MRVIEW_DEPS: ${{ github.workspace }}/deps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+      - name: Install difftastic
+        run: |
+          curl -fsSL "https://github.com/Wilfred/difftastic/releases/download/${DIFFT_VERSION}/difft-${DIFFT_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin difft
+          difft --version
+      - name: Clone dependencies
+        run: |
+          git clone --depth 1 https://github.com/lewis6991/gitsigns.nvim "$MRVIEW_DEPS/gitsigns.nvim"
+          git clone --depth 1 https://github.com/folke/snacks.nvim "$MRVIEW_DEPS/snacks.nvim"
+      - name: Test
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          make test
