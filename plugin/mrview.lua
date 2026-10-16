@@ -22,6 +22,7 @@ local subcommands = {
     comments = function() require("mrview").comments() end,
     deleted = function() require("mrview").toggle_deleted() end,
     split = function() require("mrview").toggle_split() end,
+    migrate = function() require("mrview").migrate() end,
 }
 
 vim.api.nvim_create_user_command("MRView", function(opts)

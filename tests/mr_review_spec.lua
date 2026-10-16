@@ -46,4 +46,27 @@ function M.test_old_sha_mark_is_unknown_until_remarked()
     h.assert_eq(review.load_state(dir).HEAD["a.lua"].head, head)
 end
 
+function M.test_migrate_imports_old_state_file()
+    local dir = open_repo()
+    local head = review.git({ "rev-parse", "HEAD" }, dir)
+    local old = vim.fs.joinpath(vim.fn.stdpath("state"), "mr-review", (dir:gsub("[^%w]", "_")) .. ".json")
+    vim.fn.mkdir(vim.fs.dirname(old), "p")
+    vim.fn.writefile({ vim.json.encode({
+        [".base"] = "main",
+        HEAD = { ["a.lua"] = head, ["gone.lua"] = head },
+        [".comments"] = { { path = "a.lua", start_line = 1, line = 1, body = "hi", head = head } },
+    }) }, old)
+
+    review.migrate(dir)
+    local state = review.load_state(dir)
+    h.assert_eq(state[".base"], "main")
+    h.assert_eq(state.HEAD["a.lua"].head, head)
+    h.assert_eq(status(dir), "✓", "an untouched file stays current after migration")
+    h.assert_eq(state.HEAD["gone.lua"].blob, nil, "a file missing at the commit has no blob")
+    h.assert_eq(#state[".comments"], 1)
+    h.assert_eq(vim.uv.fs_stat(old), nil, "old file renamed")
+    h.assert_eq(vim.uv.fs_stat(old .. ".migrated") ~= nil, true)
+    vim.fn.delete(old .. ".migrated")
+end
+
 return M

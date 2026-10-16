@@ -44,5 +44,6 @@ function M.comments() comments().pick() end
 function M.nav(dir) structdiff().nav(dir) end
 function M.toggle_deleted(value) structdiff().toggle_deleted(value) end
 function M.toggle_split(value) structdiff().toggle_split(value) end
+function M.migrate(root) review().migrate(root) end
 
 return M
