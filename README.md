@@ -112,6 +112,15 @@ Defaults:
 require("incognito").setup({
     remote = "origin",               -- remote whose HEAD names the target
     targets = { "main", "master" },  -- fallback target names
+    commit_mode = {
+        -- Ignored directories of your checkout, at any depth, symlinked
+        -- into the commit mode worktree so an LSP finds the dependencies.
+        link = { "node_modules" },
+        -- A commit whose lockfiles differ from your checkout gets a warning:
+        -- the linked dependencies may not fit it.
+        lockfiles = { "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml",
+                      "yarn.lock", "bun.lock", "bun.lockb" },
+    },
     difft = {
         cmd = "difft",
         debounce_ms = 300,           -- delay before rerunning difft after an edit
@@ -148,9 +157,12 @@ the chunks are turned into signs, inline highlights and virtual lines.
 - difftastic's JSON output is unstable and needs `DFT_UNSTABLE=yes`; a new
   difftastic release can change it.
 - Commit mode checks each commit out in a detached worktree under
-  `stdpath("cache")/incognito/` and opens the files from there. Untracked
-  files of your checkout (`node_modules`, build output) are not in it, so an
-  LSP may know less there. The worktree is scratch: edits to its files are
+  `stdpath("cache")/incognito/` and opens the files from there. Ignored
+  directories listed in `commit_mode.link` are symlinked from your checkout,
+  so they hold the dependencies installed there, not the ones of the commit.
+  When the commit's lockfile differs from yours, commit mode warns that LSP
+  errors about imports and types may be false. Other untracked files (build
+  output, `.env`) are not in the worktree. The worktree is scratch: edits to its files are
   discarded on the next step and on `off`. It is removed on `off` and when
   Neovim exits; one left by a crashed session is removed the next time
   commit mode starts.

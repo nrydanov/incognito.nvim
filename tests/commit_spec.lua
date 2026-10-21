@@ -111,4 +111,65 @@ function M.test_commit_buffers_with_unsaved_edits_block_stepping()
     mr.off()
 end
 
+local function capture_notify(fn)
+    local notify, messages = vim.notify, {}
+    vim.notify = function(msg, level)
+        messages[#messages + 1] = { msg = msg, level = level }
+    end
+    local ok, err = pcall(fn)
+    vim.notify = notify
+    assert(ok, err)
+    return messages
+end
+
+local function warnings(messages)
+    return vim.tbl_filter(function(m)
+        return m.level == vim.log.levels.WARN
+    end, messages)
+end
+
+function M.test_ignored_dependencies_are_linked_and_survive()
+    local dir = feature_repo()
+    h.write(dir, ".gitignore", "node_modules/\n")
+    commit(dir, "packages/a/index.js", "x\n", "package")
+    h.write(dir, "node_modules/dep/index.js", "dep\n")
+    h.write(dir, "packages/a/node_modules/local/index.js", "local\n")
+
+    local commits = mr._mr_commits(dir)
+    mr._enter_commit_mode(dir, commits, 1)
+    local worktree = mr._commit_mode().worktree
+    -- Commit 1 has no packages/a to hold the nested link.
+    h.assert_eq(mr._commit_mode().linked, { "node_modules" })
+    h.assert_eq(vim.uv.fs_lstat(vim.fs.joinpath(worktree, "node_modules")).type, "link")
+    h.assert_eq(vim.fn.readfile(vim.fs.joinpath(worktree, "node_modules/dep/index.js")), { "dep" })
+    mr.off()
+
+    mr._enter_commit_mode(dir, commits, #commits)
+    h.assert_eq(mr._commit_mode().linked, { "node_modules", "packages/a/node_modules" }, "nested ones too")
+    mr.off()
+    h.assert_eq(vim.fn.readfile(vim.fs.joinpath(dir, "node_modules/dep/index.js")), { "dep" }, "real dir survives")
+    h.assert_eq(vim.fn.readfile(vim.fs.joinpath(dir, "packages/a/node_modules/local/index.js")), { "local" })
+end
+
+function M.test_lockfile_drift_warns_while_dependencies_are_linked()
+    local dir = feature_repo()
+    commit(dir, ".gitignore", "node_modules/\n", "ignore")
+    commit(dir, "package-lock.json", "{}\n", "lock")
+    h.write(dir, "node_modules/dep/index.js", "dep\n")
+    local commits = mr._mr_commits(dir)
+
+    local messages = capture_notify(function()
+        mr._enter_commit_mode(dir, commits, 1)
+    end)
+    local warns = warnings(messages)
+    h.assert_eq(#warns, 1, "commit 1 predates the lockfile")
+    assert(warns[1].msg:find("package-lock.json", 1, true), warns[1].msg)
+
+    messages = capture_notify(function()
+        mr.step_commit(#commits - 1)
+    end)
+    h.assert_eq(warnings(messages), {}, "the last commit has the checkout's lockfile")
+    mr.off()
+end
+
 return M
