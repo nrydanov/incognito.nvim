@@ -4,6 +4,19 @@ M.config = {
     remote = "origin",
     -- Tried as <remote>/<name>, then as local branches.
     targets = { "main", "master" },
+    -- Ignored directories of the checkout (at any depth) linked into the
+    -- commit mode worktree, and the lockfiles that tell whether they fit.
+    commit_mode = {
+        link = { "node_modules" },
+        lockfiles = {
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+        },
+    },
 }
 
 local function repo_dir()
@@ -186,7 +199,8 @@ end
 -- and diffed against its parent, so the buffers show exactly what that
 -- commit changed while the user's checkout (HEAD, index, files) stays put.
 -- { root = the user's checkout, worktree, commits = { {sha, short, subject} }
--- oldest first, index = current commit, base = its parent }
+-- oldest first, index = current commit, base = its parent, linked = paths
+-- symlinked from the checkout }
 ---@type table?
 local commit_mode = nil
 
@@ -309,6 +323,47 @@ local function add_worktree(root, sha)
     return path
 end
 
+-- Dependencies are not in git, so the worktree borrows them from the
+-- checkout: every ignored directory named in `link` gets a symlink at the
+-- same place. Returns the linked paths.
+local function link_ignored(root, worktree)
+    local names = {}
+    for _, name in ipairs(M.config.commit_mode.link or {}) do
+        names[name] = true
+    end
+    if vim.tbl_isempty(names) then
+        return {}
+    end
+    local out = git({ "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory" }, root) or ""
+    local linked = {}
+    for _, line in ipairs(vim.split(out, "\0", { trimempty = true })) do
+        local rel = line:gsub("/$", "")
+        local dest = vim.fs.joinpath(worktree, rel)
+        if
+            names[vim.fs.basename(rel)]
+            and vim.uv.fs_stat(vim.fs.dirname(dest))
+            and not vim.uv.fs_lstat(dest)
+            and vim.uv.fs_symlink(vim.fs.joinpath(root, rel), dest)
+        then
+            linked[#linked + 1] = rel
+        end
+    end
+    return linked
+end
+
+-- Lockfiles that differ between the commit and the checkout: the linked
+-- dependencies were installed for the latter, so LSP errors may be false.
+local function lockfile_drift(root, sha)
+    local specs = vim.tbl_map(function(name)
+        return ":(glob)**/" .. name
+    end, M.config.commit_mode.lockfiles or {})
+    if #specs == 0 then
+        return {}
+    end
+    local out = git(vim.list_extend({ "diff", "--name-only", sha, "--" }, specs), root) or ""
+    return vim.split(out, "\n", { trimempty = true })
+end
+
 local function remove_worktree(root, path)
     local _, err = git({ "worktree", "remove", "--force", path }, root)
     if err then
@@ -373,6 +428,16 @@ local function show_commit(index)
     move_base(mode.base, true)
     move_windows(mode.root, mode.worktree)
     vim.notify(("Incognito: %d/%d %s %s"):format(index, #mode.commits, commit.short, commit.subject))
+    local drift = #mode.linked > 0 and lockfile_drift(mode.root, commit.sha) or {}
+    if #drift > 0 then
+        vim.notify(
+            ("Incognito: %s differs from your checkout, whose %s is linked here; LSP errors about imports and types may be false"):format(
+                table.concat(drift, ", "),
+                table.concat(mode.linked, ", ")
+            ),
+            vim.log.levels.WARN
+        )
+    end
     return true
 end
 
@@ -381,7 +446,7 @@ local function enter_commit_mode(root, commits, index)
     if not worktree then
         return vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
     end
-    commit_mode = { root = root, worktree = worktree, commits = commits }
+    commit_mode = { root = root, worktree = worktree, commits = commits, linked = link_ignored(root, worktree) }
     if not show_commit(index) then
         commit_mode = nil
         return remove_worktree(root, worktree)
