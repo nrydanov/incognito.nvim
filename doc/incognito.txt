@@ -42,6 +42,11 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
               opens the files from there. Your checkout is not touched.
   next        Next commit in commit mode.
   prev        Previous commit in commit mode.
+  tip         In commit mode, switch the window between the file at the
+              commit and the same file in the working tree, on the same
+              line of code. The working tree file is diffed against the
+              commit, so its signs show what changed after it. Renames
+              are followed; a file deleted later is reported.
   reviewed    Toggle the reviewed mark of the current file.
   since       Diff the current file against the commit it was reviewed at.
   deleted     Toggle deleted lines (structural mode).
@@ -51,7 +56,7 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
 
 Lua functions with the same actions: `require("incognito").on()`,
 `structural()`, `off()`, `base()`, `files()`, `commits()`, `next_commit()`,
-`prev_commit()`, `toggle_reviewed()`, `since_review()`,
+`prev_commit()`, `toggle_tip()`, `toggle_reviewed()`, `since_review()`,
 `nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
 
 ==============================================================================

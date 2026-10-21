@@ -100,6 +100,21 @@ function M.test_unchanged_file_has_no_marks()
     h.assert_eq(h.marks(bufnr), {})
 end
 
+function M.test_buffer_base_overrides_the_common_one()
+    local dir = h.repo({ ["a.lua"] = "local a = 1\n" })
+    h.write(dir, "a.lua", "local a = 2\n")
+    vim.system({ "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "two" }, { cwd = dir }):wait()
+    local bufnr = h.open(dir, "a.lua")
+    h.assert_eq(h.marks(bufnr), {}, "same as HEAD")
+
+    sd.set_buf_base(bufnr, "HEAD~1")
+    h.wait_run(bufnr)
+    h.assert_eq(h.marks(bufnr)[1], "Change", "against its own base")
+    sd.set_buf_base(bufnr, nil)
+    h.wait_run(bufnr)
+    h.assert_eq(h.marks(bufnr), {}, "back to the common base")
+end
+
 function M.test_whitespace_only_change_is_format()
     local dir = h.repo({ ["a.lua"] = "local a = 1\nlocal b = 2\n" })
     h.write(dir, "a.lua", "local a  =  1\n\n\nlocal b = 2\n")

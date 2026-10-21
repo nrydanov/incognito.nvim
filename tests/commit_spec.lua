@@ -213,4 +213,100 @@ function M.test_lockfile_drift_warns_while_dependencies_are_linked()
     mr.off()
 end
 
+function M.test_map_line_follows_code_across_edits()
+    local from = { "a", "b", "c", "d" }
+    h.assert_eq({ mr._map_line(from, { "x", "y", "a", "b", "c", "d" }, 2) }, { 4, false }, "shifted by an insertion")
+    h.assert_eq({ mr._map_line(from, { "a", "B", "c", "d" }, 2) }, { 2, true }, "changed line")
+    h.assert_eq({ mr._map_line(from, { "a", "c", "d" }, 2) }, { 2, true }, "deleted line lands on the next one")
+    h.assert_eq({ mr._map_line(from, { "a", "c", "d" }, 4) }, { 3, false }, "after a deletion")
+    h.assert_eq({ mr._map_line(from, { "a", "b" }, 4) }, { 2, true }, "deleted at the end")
+    h.assert_eq({ mr._map_line(from, { "a", "b", "new", "c", "d" }, 2) }, { 2, false }, "insertion after the line")
+end
+
+-- main: a.lua; commit 1 writes a.lua, b.lua, d.lua; commit 2 inserts two
+-- lines on top of a.lua and changes its last line, renames b.lua to c.lua
+-- and deletes d.lua.
+local function tip_repo()
+    local dir = vim.fn.resolve(h.repo({ ["a.lua"] = "v0\n" }))
+    vim.cmd("silent! %bwipeout!")
+    mr.off()
+    git({ "branch", "-M", "main" }, dir)
+    git({ "checkout", "-qb", "feature" }, dir)
+    h.write(dir, "b.lua", "b1\nb2\n")
+    h.write(dir, "d.lua", "d\n")
+    commit(dir, "a.lua", "one\ntwo\nthree\n", "one")
+    git({ "mv", "b.lua", "c.lua" }, dir)
+    git({ "rm", "-q", "d.lua" }, dir)
+    commit(dir, "a.lua", "new1\nnew2\none\ntwo\nTHREE\n", "two")
+    return dir
+end
+
+local function enter_at_first(dir, file)
+    vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, file)))
+    mr._enter_commit_mode(dir, mr._mr_commits(dir), 1)
+    return mr._commit_mode()
+end
+
+function M.test_toggle_tip_switches_between_commit_and_working_tree()
+    local dir = tip_repo()
+    local mode = enter_at_first(dir, "a.lua")
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+    local messages = capture_notify(mr.toggle_tip)
+    h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(dir, "a.lua"), "working tree file")
+    h.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 4, "same line of code")
+    h.assert_eq(messages[#messages].msg, "Incognito: working tree")
+    local tip_buf = vim.api.nvim_get_current_buf()
+    assert(
+        vim.wait(5000, function()
+            local cache = require("gitsigns.cache").cache[tip_buf]
+            return cache ~= nil and cache.git_obj.revision == mode.commits[1].sha
+        end, 50),
+        "gitsigns diffs the working tree file against the commit"
+    )
+
+    mr.toggle_tip()
+    h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(mode.worktree, "a.lua"))
+    h.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 2)
+    h.assert_eq(mode.tip[tip_buf], nil, "back with the other checkout buffers")
+
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    messages = capture_notify(mr.toggle_tip)
+    h.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 5)
+    h.assert_eq(messages[#messages].msg, "Incognito: working tree, this line was changed after the commit")
+    mr.off()
+end
+
+function M.test_stepping_keeps_windows_on_the_working_tree()
+    local dir = tip_repo()
+    enter_at_first(dir, "a.lua")
+    mr.toggle_tip()
+    mr.step_commit(1)
+    h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(dir, "a.lua"), "the window stays where it was put")
+    local tip_buf, sha = vim.api.nvim_get_current_buf(), mr._commit_mode().commits[2].sha
+    assert(
+        vim.wait(5000, function()
+            local cache = require("gitsigns.cache").cache[tip_buf]
+            return cache ~= nil and cache.git_obj.revision == sha
+        end, 50),
+        "the working tree file is diffed against the new commit"
+    )
+    mr.off()
+end
+
+function M.test_toggle_tip_follows_renames_and_reports_deletions()
+    local dir = tip_repo()
+    local mode = enter_at_first(dir, "b.lua")
+    mr.toggle_tip()
+    h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(dir, "c.lua"), "renamed later")
+    mr.toggle_tip()
+    h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(mode.worktree, "b.lua"), "and back")
+
+    vim.cmd("edit " .. vim.fn.fnameescape(vim.fs.joinpath(mode.worktree, "d.lua")))
+    local messages = capture_notify(mr.toggle_tip)
+    h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(mode.worktree, "d.lua"), "nowhere to go")
+    assert(messages[1].msg:find("d.lua was deleted in %x+ two"), messages[1].msg)
+    mr.off()
+end
+
 return M
