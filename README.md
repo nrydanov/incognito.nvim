@@ -17,8 +17,8 @@ motions, and the review is there, in the gutter.
   base version of the file.
 - A files picker lists the changed files with reviewed marks: `✓` reviewed,
   `~` changed since it was marked.
-- Commit mode steps through the MR one commit at a time by detaching HEAD
-  at each commit.
+- Commit mode steps through the MR one commit at a time in a separate
+  worktree; your checkout, its HEAD and uncommitted changes stay as they are.
 
 ## Requirements
 
@@ -147,9 +147,13 @@ the chunks are turned into signs, inline highlights and virtual lines.
 
 - difftastic's JSON output is unstable and needs `DFT_UNSTABLE=yes`; a new
   difftastic release can change it.
-- Commit mode checks out each commit with a detached HEAD, so it refuses to
-  start while tracked files have uncommitted changes. If Neovim exits during
-  commit mode, HEAD stays detached until you check the branch out again.
+- Commit mode checks each commit out in a detached worktree under
+  `stdpath("cache")/incognito/` and opens the files from there. Untracked
+  files of your checkout (`node_modules`, build output) are not in it, so an
+  LSP may know less there. The worktree is scratch: edits to its files are
+  discarded on the next step and on `off`. It is removed on `off` and when
+  Neovim exits; one left by a crashed session is removed the next time
+  commit mode starts.
 - There is no forge integration.
 
 ## Comparison
