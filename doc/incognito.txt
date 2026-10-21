@@ -38,7 +38,8 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
   files       Picker of changed files with reviewed marks (✓ reviewed,
               ~ changed since marked).
   commits     Picker of MR commits; selecting one enters commit mode,
-              which detaches HEAD at that commit.
+              which checks that commit out in a separate worktree and
+              opens the files from there. Your checkout is not touched.
   next        Next commit in commit mode.
   prev        Previous commit in commit mode.
   reviewed    Toggle the reviewed mark of the current file.
@@ -77,8 +78,9 @@ Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 5. LIMITATIONS                                               *incognito-limitations*
 
 - difftastic JSON output is unstable and needs `DFT_UNSTABLE=yes`.
-- Commit mode checks out commits with a detached HEAD and refuses to start
-  while tracked files have uncommitted changes.
+- Commit mode works in a detached worktree under `stdpath("cache")`.
+  Untracked files of your checkout are not in it, and edits to its files
+  are discarded on the next step and on `off`.
 - No forge integration.
 
  vim:tw=78:ts=8:ft=help:norl:
