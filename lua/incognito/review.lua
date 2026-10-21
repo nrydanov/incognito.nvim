@@ -4,6 +4,19 @@ M.config = {
     remote = "origin",
     -- Tried as <remote>/<name>, then as local branches.
     targets = { "main", "master" },
+    -- Ignored directories of the checkout (at any depth) linked into the
+    -- commit mode worktree, and the lockfiles that tell whether they fit.
+    commit_mode = {
+        link = { "node_modules" },
+        lockfiles = {
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+        },
+    },
 }
 
 local function repo_dir()
@@ -182,44 +195,34 @@ local function rel_path(root)
     return vim.fs.relpath(root, name)
 end
 
--- Commit mode: HEAD is detached at one commit of the MR and diffed against
--- its parent, so the buffers show exactly what that commit changed.
--- { ref = ref to return to, root, commits = { {sha, short, subject} } oldest
--- first, index = current commit, base = its parent }
+-- Commit mode: one commit of the MR is checked out in a worktree of its own
+-- and diffed against its parent, so the buffers show exactly what that
+-- commit changed while the user's checkout (HEAD, index, files) stays put.
+-- { root = the user's checkout, worktree, commits = { {sha, short, subject} }
+-- oldest first, index = current commit, base = its parent, linked = paths
+-- symlinked from the checkout, tip = { [bufnr] = sha | false } buffers of
+-- the checkout switched to with toggle_tip: diffed against the commit, the
+-- sha once gitsigns took it }
 ---@type table?
 local commit_mode = nil
 
-local COMMIT_KEY = ".commit_mode"
+-- In commit mode the review runs in the worktree, also when the current
+-- buffer is a file of the user's checkout.
+local function review_root()
+    local root = repo_root()
+    if commit_mode and root == commit_mode.root then
+        return commit_mode.worktree
+    end
+    return root
+end
 
 -- Base to diff against and its name: the commit's parent in commit mode,
 -- the merge base with `target` otherwise.
 local function current_base(root, target)
-    if commit_mode and commit_mode.root == root then
+    if commit_mode and commit_mode.worktree == root then
         return commit_mode.base, "the commit parent"
     end
     return merge_base(target, root), target
-end
-
-local stale_warned = false
-
--- A session that died in commit mode leaves HEAD detached; say how to go back.
-local function warn_stale_commit_mode(root)
-    if commit_mode or stale_warned then
-        return
-    end
-    local saved = load_state(root)[COMMIT_KEY]
-    if type(saved) ~= "table" or type(saved.ref) ~= "string" then
-        return
-    end
-    if git({ "symbolic-ref", "-q", "HEAD" }, root) then
-        update_state(root, COMMIT_KEY, nil) -- HEAD is back on a branch
-        return
-    end
-    stale_warned = true
-    vim.notify(
-        "Incognito: HEAD is still detached by an earlier commit mode, run `git checkout " .. saved.ref .. "`",
-        vim.log.levels.WARN
-    )
 end
 
 -- Point gitsigns at the review base; returns the base and its name.
@@ -232,7 +235,7 @@ local function gitsigns_error(err)
 end
 
 local function change_base(target)
-    local root = repo_root()
+    local root = review_root()
     local base, name = current_base(root, target or resolve_target(root))
     if base then
         require("gitsigns").change_base(base, true, gitsigns_error)
@@ -241,7 +244,6 @@ local function change_base(target)
 end
 
 function M.on(target)
-    warn_stale_commit_mode(repo_root())
     local base, name = change_base(target)
     if base then
         require("gitsigns").toggle_linehl(true)
@@ -277,60 +279,238 @@ local function mr_commits(root)
     return commits
 end
 
--- Checkout rewrites files under open buffers, so nothing may be unsaved
--- or uncommitted when HEAD starts moving.
-local function can_enter(root)
-    if git({ "status", "--porcelain", "--untracked-files=no" }, root) ~= "" then
-        vim.notify("Incognito: commit the changes in the working tree first", vim.log.levels.ERROR)
-        return false
+-- Commit mode worktrees live outside the repository, so tools that watch
+-- it never see them: <cache>/incognito/<repo>-<hash>-<pid>, one per
+-- repository and Neovim process. Resolved, as git records it.
+local function worktree_prefix(root)
+    local common = git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, root)
+    local dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "incognito")
+    vim.fn.mkdir(dir, "p")
+    dir = vim.uv.fs_realpath(dir)
+    if not (common and dir) then
+        return nil
     end
-    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.bo[bufnr].modified and vim.bo[bufnr].buftype == "" then
-            vim.notify("Incognito: save the modified buffers first", vim.log.levels.ERROR)
-            return false
-        end
-    end
-    return true
+    return vim.fs.joinpath(dir, ("%s-%s-"):format(vim.fs.basename(root), vim.fn.sha256(common):sub(1, 8)))
 end
 
--- Move gitsigns (for every buffer when `global`) and, if on, structdiff to `base`.
-local function move_base(base, global)
-    require("gitsigns").change_base(base, global, gitsigns_error)
+-- Worktrees left by sessions that died in commit mode: their process is gone.
+local function remove_stale_worktrees(root, prefix)
+    git({ "worktree", "prune" }, root)
+    local out = git({ "worktree", "list", "--porcelain" }, root) or ""
+    for path in out:gmatch("worktree ([^\n]+)") do
+        local pid = vim.startswith(path, prefix) and tonumber(path:sub(#prefix + 1))
+        if pid and pid ~= vim.fn.getpid() and vim.uv.kill(pid, 0) ~= 0 then
+            git({ "worktree", "remove", "--force", path }, root)
+        end
+    end
+end
+
+-- A fresh detached worktree of `root` at `sha`; returns its path.
+local function add_worktree(root, sha)
+    local prefix = worktree_prefix(root)
+    if not prefix then
+        return nil, root .. " is not a git repository"
+    end
+    remove_stale_worktrees(root, prefix)
+    local path = prefix .. vim.fn.getpid()
+    if vim.uv.fs_stat(path) then
+        -- An earlier commit mode of this session failed to remove it.
+        git({ "worktree", "remove", "--force", path }, root)
+        vim.fn.delete(path, "rf")
+    end
+    local _, err = git({ "worktree", "add", "--quiet", "--detach", path, sha }, root)
+    if err then
+        return nil, err
+    end
+    return path
+end
+
+-- Dependencies are not in git, so the worktree borrows them from the
+-- checkout: every ignored directory named in `link` gets a symlink at the
+-- same place. Returns the linked paths.
+local function link_ignored(root, worktree)
+    local names = {}
+    for _, name in ipairs(M.config.commit_mode.link or {}) do
+        names[name] = true
+    end
+    if vim.tbl_isempty(names) then
+        return {}
+    end
+    local out = git({ "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory" }, root) or ""
+    local linked = {}
+    for _, line in ipairs(vim.split(out, "\0", { trimempty = true })) do
+        local rel = line:gsub("/$", "")
+        local dest = vim.fs.joinpath(worktree, rel)
+        if
+            names[vim.fs.basename(rel)]
+            and vim.uv.fs_stat(vim.fs.dirname(dest))
+            and not vim.uv.fs_lstat(dest)
+            and vim.uv.fs_symlink(vim.fs.joinpath(root, rel), dest)
+        then
+            linked[#linked + 1] = rel
+        end
+    end
+    return linked
+end
+
+-- Lockfiles that differ between the commit and the checkout: the linked
+-- dependencies were installed for the latter, so LSP errors may be false.
+local function lockfile_drift(root, sha)
+    local specs = vim.tbl_map(function(name)
+        return ":(glob)**/" .. name
+    end, M.config.commit_mode.lockfiles or {})
+    if #specs == 0 then
+        return {}
+    end
+    local out = git(vim.list_extend({ "diff", "--name-only", sha, "--" }, specs), root) or ""
+    return vim.split(out, "\n", { trimempty = true })
+end
+
+local function remove_worktree(root, path)
+    local _, err = git({ "worktree", "remove", "--force", path }, root)
+    if err then
+        vim.notify("Incognito: " .. err, vim.log.levels.WARN)
+    end
+end
+
+-- Buffers of files under `dir`.
+local function buffers_in(dir)
+    return vim.tbl_filter(function(bufnr)
+        return vim.fs.relpath(dir, vim.api.nvim_buf_get_name(bufnr)) ~= nil
+    end, vim.api.nvim_list_bufs())
+end
+
+-- Every window showing a file under `from` switches to the same file under
+-- `to`, if it exists there, at the same cursor position. A window that
+-- cannot leave its modified buffer ('nohidden') stays, as do those showing
+-- a buffer in `keep`.
+local function move_windows(from, to, keep)
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        local bufnr = vim.api.nvim_win_get_buf(win)
+        local rel = vim.bo[bufnr].buftype == ""
+            and not (keep and keep[bufnr] ~= nil)
+            and vim.fs.relpath(from, vim.api.nvim_buf_get_name(bufnr))
+        local path = rel and vim.fs.joinpath(to, rel)
+        if path and vim.uv.fs_stat(path) then
+            local cursor = vim.api.nvim_win_get_cursor(win)
+            local target = vim.fn.bufadd(path)
+            if pcall(vim.api.nvim_win_set_buf, win, target) then
+                vim.bo[target].buflisted = true
+                pcall(vim.api.nvim_win_set_cursor, win, cursor)
+            end
+        end
+    end
+end
+
+-- Move gitsigns (for every buffer when `global`) and, if on, structdiff to
+-- `base`; `done` runs once gitsigns is through.
+local function move_base(base, global, done)
+    require("gitsigns").change_base(base, global, function(err)
+        gitsigns_error(err)
+        if done then
+            vim.schedule(done)
+        end
+    end)
     local sd = require("incognito.structdiff")
     if sd.active() then
         sd.enable(base)
     end
 end
 
+-- Diff one buffer against `base` in gitsigns and structdiff. gitsigns
+-- ignores a buffer it has not attached to yet, and has no public way to
+-- tell, so its cache is asked; returns whether it took the base.
+local function set_buf_base(bufnr, base)
+    require("incognito.structdiff").set_buf_base(bufnr, base)
+    local ok, cache = pcall(require, "gitsigns.cache")
+    if not (ok and cache.cache[bufnr]) then
+        return false
+    end
+    vim.api.nvim_buf_call(bufnr, function()
+        require("gitsigns").change_base(base, false, gitsigns_error)
+    end)
+    return true
+end
+
+-- A checkout buffer next to a commit shows what changed after the commit.
+-- Until gitsigns attaches, the GitSignsUpdate autocmd retries.
+local function apply_tip_base(bufnr)
+    local mode = assert(commit_mode)
+    local sha = mode.commits[mode.index].sha
+    mode.tip[bufnr] = set_buf_base(bufnr, sha) and sha or false
+end
+
+-- The checkout rewrites the worktree files, so their buffers may hold no
+-- unsaved edits. The worktree is scratch: saved edits are discarded.
 local function show_commit(index)
     local mode = assert(commit_mode)
+    for _, bufnr in ipairs(buffers_in(mode.worktree)) do
+        if vim.bo[bufnr].modified then
+            vim.notify("Incognito: save or undo the changes in the commit buffers first", vim.log.levels.ERROR)
+            return false
+        end
+    end
     local commit = mode.commits[index]
-    local _, err = git({ "checkout", "--quiet", "--detach", commit.sha }, mode.root)
+    local _, err = git({ "checkout", "--quiet", "--force", "--detach", commit.sha }, mode.worktree)
     if err then
         vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
         return false
     end
     mode.index = index
-    mode.base = git({ "rev-parse", commit.sha .. "^" }, mode.root)
+    mode.base = git({ "rev-parse", commit.sha .. "^" }, mode.worktree)
     vim.cmd.checktime()
-    move_base(mode.base, true)
+    -- The global base reaches every buffer, the checkout ones next to the
+    -- commit too; they get theirs back once it is through.
+    move_base(mode.base, true, function()
+        if commit_mode == mode then
+            for bufnr in pairs(mode.tip) do
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    apply_tip_base(bufnr)
+                end
+            end
+        end
+    end)
+    move_windows(mode.root, mode.worktree, mode.tip)
     vim.notify(("Incognito: %d/%d %s %s"):format(index, #mode.commits, commit.short, commit.subject))
+    local drift = #mode.linked > 0 and lockfile_drift(mode.root, commit.sha) or {}
+    if #drift > 0 then
+        vim.notify(
+            ("Incognito: %s differs from your checkout, whose %s is linked here; LSP errors about imports and types may be false"):format(
+                table.concat(drift, ", "),
+                table.concat(mode.linked, ", ")
+            ),
+            vim.log.levels.WARN
+        )
+    end
     return true
 end
 
--- Remember the ref to return to, in the state file and for :qa.
-local function enter_commit_mode(root, ref, commits, index)
-    commit_mode = { ref = ref, root = root, commits = commits }
+local function enter_commit_mode(root, commits, index)
+    local worktree, err = add_worktree(root, commits[index].sha)
+    if not worktree then
+        return vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
+    end
+    commit_mode =
+        { root = root, worktree = worktree, commits = commits, linked = link_ignored(root, worktree), tip = {} }
     if not show_commit(index) then
         commit_mode = nil
-        return
+        return remove_worktree(root, worktree)
     end
-    update_state(root, COMMIT_KEY, { ref = ref, root = root })
     vim.api.nvim_create_autocmd("VimLeavePre", {
         group = vim.api.nvim_create_augroup("incognito", { clear = true }),
         callback = function()
             if commit_mode then
-                git({ "checkout", "--quiet", commit_mode.ref }, commit_mode.root)
+                git({ "worktree", "remove", "--force", commit_mode.worktree }, commit_mode.root)
+            end
+        end,
+    })
+    vim.api.nvim_create_autocmd("User", {
+        group = "incognito",
+        pattern = "GitSignsUpdate",
+        callback = function(ev)
+            local bufnr = ev.data and ev.data.buffer
+            if commit_mode and bufnr and commit_mode.tip[bufnr] == false then
+                apply_tip_base(bufnr)
             end
         end,
     })
@@ -340,6 +520,127 @@ local function enter_commit_mode(root, ref, commits, index)
     end
 end
 
+-- Windows go back to the user's files, the commit buffers and the worktree away.
+local function leave_commit_mode()
+    local mode = assert(commit_mode)
+    commit_mode = nil
+    vim.api.nvim_clear_autocmds({ group = "incognito" })
+    move_windows(mode.worktree, mode.root)
+    for _, bufnr in ipairs(buffers_in(mode.worktree)) do
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
+    remove_worktree(mode.root, mode.worktree)
+end
+
+-- Where line `lnum` of `from` is in `to`, and whether it changed on the way:
+-- a changed or deleted line lands on what took its place.
+local function map_line(from, to, lnum)
+    local a = table.concat(from, "\n") .. "\n"
+    local b = table.concat(to, "\n") .. "\n"
+    local offset = 0
+    for _, hunk in ipairs(vim.diff(a, b, { result_type = "indices" })) do
+        local sa, ca, sb, cb = unpack(hunk)
+        -- A pure insertion (ca == 0) goes after line sa.
+        if lnum < sa or (ca == 0 and lnum == sa) then
+            break
+        end
+        if lnum < sa + ca then
+            local target = cb > 0 and sb + math.min(lnum - sa, cb - 1) or sb + 1
+            return math.max(1, math.min(target, #to)), true
+        end
+        offset = offset + cb - ca
+    end
+    return math.max(1, math.min(lnum + offset, #to)), false
+end
+
+-- Path of `rel` on the other side: from the commit to the working tree
+-- (`to_tip`) or back. Same path, else a rename git sees; nil if absent.
+local function counterpart(mode, rel, to_tip)
+    if vim.uv.fs_stat(vim.fs.joinpath(to_tip and mode.root or mode.worktree, rel)) then
+        return rel
+    end
+    local sha = mode.commits[mode.index].sha
+    local out = git({ "diff", "-M", "--name-status", "-z", "--diff-filter=R", sha }, mode.root) or ""
+    local fields = vim.split(out, "\0", { trimempty = true })
+    for i = 1, #fields - 2, 3 do
+        local old, new = fields[i + 1], fields[i + 2]
+        if to_tip and old == rel then
+            return new
+        elseif not to_tip and new == rel then
+            return old
+        end
+    end
+    return nil
+end
+
+local function missing_message(mode, rel, to_tip)
+    if not to_tip then
+        return rel .. " is not in this commit yet"
+    end
+    local sha = mode.commits[mode.index].sha
+    local gone = git({ "log", "-1", "--diff-filter=D", "--format=%h %s", sha .. "..HEAD", "--", rel }, mode.root)
+    return rel .. (gone and gone ~= "" and " was deleted in " .. gone or " is not in your working tree")
+end
+
+--- In commit mode, switch the current window between the file at the
+--- commit and the same file in the working tree, keeping the cursor on
+--- the same line of code.
+function M.toggle_tip()
+    local mode = commit_mode
+    if not mode then
+        return vim.notify("Incognito: commit mode is off, enter it from the MR commits picker", vim.log.levels.WARN)
+    end
+    local bufnr = vim.api.nvim_get_current_buf()
+    local name = vim.api.nvim_buf_get_name(bufnr)
+    local in_worktree = vim.fs.relpath(mode.worktree, name)
+    local rel = in_worktree or vim.fs.relpath(mode.root, name)
+    if not rel or vim.bo[bufnr].buftype ~= "" then
+        return vim.notify("Incognito: current buffer is not a file of the review", vim.log.levels.WARN)
+    end
+    local to_tip = in_worktree ~= nil
+    local other = counterpart(mode, rel, to_tip)
+    if not other then
+        return vim.notify("Incognito: " .. missing_message(mode, rel, to_tip), vim.log.levels.WARN)
+    end
+
+    local target = vim.fn.bufadd(vim.fs.joinpath(to_tip and mode.root or mode.worktree, other))
+    vim.fn.bufload(target)
+    local view = vim.fn.winsaveview()
+    local lnum, changed = map_line(
+        vim.api.nvim_buf_get_lines(bufnr, 0, -1, false),
+        vim.api.nvim_buf_get_lines(target, 0, -1, false),
+        view.lnum
+    )
+    local ok, err = pcall(vim.api.nvim_win_set_buf, 0, target)
+    if not ok then
+        return vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
+    end
+    vim.bo[target].buflisted = true
+    -- The line stays at the same height in the window.
+    vim.fn.winrestview({ lnum = lnum, col = view.col, topline = math.max(1, lnum - (view.lnum - view.topline)) })
+
+    local commit = mode.commits[mode.index]
+    local where
+    if to_tip then
+        apply_tip_base(target)
+        where = "working tree"
+        if not git({ "merge-base", "--is-ancestor", commit.sha, "HEAD" }, mode.root) then
+            vim.notify(
+                "Incognito: HEAD of your checkout no longer contains "
+                    .. commit.short
+                    .. ", so this is not its later state",
+                vim.log.levels.WARN
+            )
+        end
+    else
+        -- Back with the other checkout buffers, against the commit parent.
+        mode.tip[bufnr] = nil
+        set_buf_base(bufnr, mode.base)
+        where = ("%d/%d %s"):format(mode.index, #mode.commits, commit.short)
+    end
+    vim.notify("Incognito: " .. where .. (changed and ", this line was changed after the commit" or ""))
+end
+
 --- Picker over the MR commits; confirming one enters commit mode on it
 --- (or jumps there if commit mode is already on).
 function M.commits()
@@ -347,7 +648,6 @@ function M.commits()
         return
     end
     local root = commit_mode and commit_mode.root or repo_root()
-    warn_stale_commit_mode(root)
     local commits = commit_mode and commit_mode.commits or mr_commits(root)
     if not commits then
         return
@@ -388,9 +688,8 @@ function M.commits()
             end
             if commit_mode then
                 show_commit(item.index)
-            elseif can_enter(root) then
-                local ref = git({ "symbolic-ref", "--short", "-q", "HEAD" }, root) or git({ "rev-parse", "HEAD" }, root)
-                enter_commit_mode(root, ref, commits, item.index)
+            else
+                enter_commit_mode(root, commits, item.index)
             end
         end,
     })
@@ -438,16 +737,7 @@ end
 
 function M.off()
     if commit_mode then
-        local root = commit_mode.root
-        local _, err = git({ "checkout", "--quiet", commit_mode.ref }, root)
-        if err then
-            -- Stay in commit mode: the ref to return to is still needed.
-            return vim.notify("Incognito: " .. err, vim.log.levels.ERROR)
-        end
-        commit_mode = nil
-        vim.api.nvim_clear_autocmds({ group = "incognito" })
-        update_state(root, COMMIT_KEY, nil)
-        vim.cmd.checktime()
+        leave_commit_mode()
     end
     require("incognito.structdiff").disable()
     local gs = require("gitsigns")
@@ -557,9 +847,9 @@ function M.files(target)
     if not have_snacks() then
         return
     end
-    local root = repo_root()
+    local root = review_root()
     target = target or resolve_target(root)
-    -- In commit mode the working tree sits at the commit, so diffing its
+    -- In commit mode the worktree sits at the commit, so diffing its
     -- parent against it lists that commit's files only.
     local base = current_base(root, target)
     if not base then
@@ -641,5 +931,11 @@ M.load_state = load_state
 M.save_state = save_state
 M.have_snacks = have_snacks
 M._reviewed_status = reviewed_status
+M._mr_commits = mr_commits
+M._enter_commit_mode = enter_commit_mode
+M._map_line = map_line
+M._commit_mode = function()
+    return commit_mode
+end
 
 return M

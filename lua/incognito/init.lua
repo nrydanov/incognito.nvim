@@ -3,6 +3,17 @@ local M = {}
 M.config = {
     remote = "origin",
     targets = { "main", "master" },
+    commit_mode = {
+        link = { "node_modules" },
+        lockfiles = {
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+        },
+    },
     difft = { cmd = "difft", debounce_ms = 300 },
 }
 
@@ -18,7 +29,7 @@ function M.setup(opts)
     M.config = vim.tbl_deep_extend("force", M.config, opts or {})
     local c = M.config
     local push = {
-        review = { remote = c.remote, targets = c.targets },
+        review = { remote = c.remote, targets = c.targets, commit_mode = c.commit_mode },
         structdiff = { difft_cmd = c.difft.cmd, debounce_ms = c.difft.debounce_ms },
     }
     for name, fields in pairs(push) do
@@ -54,6 +65,9 @@ function M.next_commit()
 end
 function M.prev_commit()
     review().step_commit(-1)
+end
+function M.toggle_tip()
+    review().toggle_tip()
 end
 function M.toggle_reviewed(target)
     review().toggle_reviewed(target)

@@ -38,9 +38,15 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
   files       Picker of changed files with reviewed marks (✓ reviewed,
               ~ changed since marked).
   commits     Picker of MR commits; selecting one enters commit mode,
-              which detaches HEAD at that commit.
+              which checks that commit out in a separate worktree and
+              opens the files from there. Your checkout is not touched.
   next        Next commit in commit mode.
   prev        Previous commit in commit mode.
+  tip         In commit mode, switch the window between the file at the
+              commit and the same file in the working tree, on the same
+              line of code. The working tree file is diffed against the
+              commit, so its signs show what changed after it. Renames
+              are followed; a file deleted later is reported.
   reviewed    Toggle the reviewed mark of the current file.
   since       Diff the current file against the commit it was reviewed at.
   deleted     Toggle deleted lines (structural mode).
@@ -50,7 +56,7 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
 
 Lua functions with the same actions: `require("incognito").on()`,
 `structural()`, `off()`, `base()`, `files()`, `commits()`, `next_commit()`,
-`prev_commit()`, `toggle_reviewed()`, `since_review()`,
+`prev_commit()`, `toggle_tip()`, `toggle_reviewed()`, `since_review()`,
 `nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
 
 ==============================================================================
@@ -60,9 +66,19 @@ Lua functions with the same actions: `require("incognito").on()`,
     require("incognito").setup({
         remote = "origin",
         targets = { "main", "master" },
+        commit_mode = {
+            link = { "node_modules" },
+            lockfiles = { "package-lock.json", "npm-shrinkwrap.json",
+                "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb" },
+        },
         difft = { cmd = "difft", debounce_ms = 300 },
     })
 <
+`commit_mode.link` names ignored directories of your checkout, at any
+depth, that are symlinked into the commit mode worktree. When a commit's
+`commit_mode.lockfiles` differ from your checkout, a warning says that the
+linked dependencies may not fit it.
+
 ==============================================================================
 4. HIGHLIGHTS                                                *incognito-highlights*
 
@@ -77,8 +93,10 @@ Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 5. LIMITATIONS                                               *incognito-limitations*
 
 - difftastic JSON output is unstable and needs `DFT_UNSTABLE=yes`.
-- Commit mode checks out commits with a detached HEAD and refuses to start
-  while tracked files have uncommitted changes.
+- Commit mode works in a detached worktree under `stdpath("cache")`.
+  Only the directories in `commit_mode.link` are brought over (as symlinks
+  to your checkout), and edits to its files are discarded on the next step
+  and on `off`.
 - No forge integration.
 
  vim:tw=78:ts=8:ft=help:norl:
