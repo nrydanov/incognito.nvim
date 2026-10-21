@@ -19,6 +19,9 @@ motions, and the review is there, in the gutter.
   `~` changed since it was marked.
 - Commit mode steps through the MR one commit at a time in a separate
   worktree; your checkout, its HEAD and uncommitted changes stay as they are.
+  One key switches between a file at the commit and the same file in your
+  working tree, on the same line of code, to see whether a later commit
+  already changed it.
 
 ## Requirements
 
@@ -48,6 +51,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
         { "<leader>gk", function() require("incognito").commits() end, desc = "MR commits" },
         { "]C", function() require("incognito").next_commit() end, desc = "MR next commit" },
         { "[C", function() require("incognito").prev_commit() end, desc = "MR previous commit" },
+        { "<leader>gt", function() require("incognito").toggle_tip() end, desc = "MR commit / working tree" },
         { "<leader>gv", function() require("incognito").toggle_reviewed() end, desc = "MR toggle reviewed" },
         { "<leader>gV", function() require("incognito").since_review() end, desc = "MR diff since review" },
     },
@@ -96,6 +100,7 @@ require("gitsigns").setup({
 | `commits`    | Picker of MR commits; selecting one enters commit mode         |
 | `next`       | Next commit in commit mode                                     |
 | `prev`       | Previous commit in commit mode                                 |
+| `tip`        | Switch between the file at the commit and in the working tree  |
 | `reviewed`   | Toggle the reviewed mark of the current file                   |
 | `since`      | Diff the current file against the commit it was reviewed at    |
 | `deleted`    | Toggle deleted lines (structural mode)                         |
@@ -166,6 +171,11 @@ the chunks are turned into signs, inline highlights and virtual lines.
   discarded on the next step and on `off`. It is removed on `off` and when
   Neovim exits; one left by a crashed session is removed the next time
   commit mode starts.
+- In commit mode, `tip` opens the file of your working tree with signs
+  against the commit, so they show what changed after it. The cursor keeps
+  its line of code; a line changed later lands on what replaced it, and
+  renames are followed. Windows switched to the working tree stay there
+  when you step to another commit.
 - There is no forge integration.
 
 ## Comparison
