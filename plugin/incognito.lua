@@ -29,6 +29,9 @@ local subcommands = {
     prev = function()
         require("incognito").prev_commit()
     end,
+    tip = function()
+        require("incognito").toggle_tip()
+    end,
     reviewed = function(arg)
         require("incognito").toggle_reviewed(arg)
     end,

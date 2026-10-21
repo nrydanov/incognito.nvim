@@ -66,6 +66,9 @@ end
 function M.prev_commit()
     review().step_commit(-1)
 end
+function M.toggle_tip()
+    review().toggle_tip()
+end
 function M.toggle_reviewed(target)
     review().toggle_reviewed(target)
 end

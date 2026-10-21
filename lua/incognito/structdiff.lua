@@ -17,7 +17,8 @@ M.config = { difft_cmd = "difft", debounce_ms = 300 }
 -- state.base: commit to diff against
 -- state.show_deleted: render deleted base lines as virtual lines
 -- state.split: render the base file as a pane to the right of every line
--- state.bufs[bufnr] = { hunks, base_file, base_text, base_lines, captures, timer, run_id, generation, result }
+-- state.bufs[bufnr] = { base, hunks, base_file, base_text, base_lines, captures, timer, run_id, generation, result }
+-- (`base` overrides state.base for that buffer)
 local state = { base = nil, show_deleted = false, split = false, wrap = {}, bufs = {} }
 local resize_timer = vim.uv.new_timer()
 local RESIZE_MS = 100
@@ -51,8 +52,8 @@ end
 
 -- Old path of `rel` if git sees it as renamed between the base and the
 -- working tree (needs the new path to be tracked, which an MR commit is).
-local function rename_source(rel, dir)
-    local out = git({ "diff", "--name-status", "-M", "-z", "--diff-filter=R", state.base }, dir)
+local function rename_source(rel, dir, base)
+    local out = git({ "diff", "--name-status", "-M", "-z", "--diff-filter=R", base }, dir)
     local fields = vim.split(out or "", "\0", { trimempty = true })
     for i = 1, #fields - 2, 3 do
         if fields[i + 2] == rel then
@@ -62,7 +63,7 @@ local function rename_source(rel, dir)
     return nil
 end
 
--- Content of the file at `state.base`, written once per buffer and cached.
+-- Content of the file at its base, written once per buffer and cached.
 local function base_file(bufnr)
     local buf = state.bufs[bufnr]
     if buf.base_file then
@@ -76,11 +77,12 @@ local function base_file(bufnr)
         return nil
     end
     local rel = vim.fs.relpath(root, name)
-    local content = rel and git({ "show", state.base .. ":" .. rel }, dir)
+    local base = buf.base or state.base
+    local content = rel and git({ "show", base .. ":" .. rel }, dir)
     if rel and not content then
         -- Not at this path in the base: maybe it was renamed since.
-        local old = rename_source(rel, dir)
-        content = old and git({ "show", state.base .. ":" .. old }, dir)
+        local old = rename_source(rel, dir, base)
+        content = old and git({ "show", base .. ":" .. old }, dir)
     end
     buf.base_missing = content == nil
     buf.base_text = content or ""
@@ -526,6 +528,19 @@ end
 function M._generation(bufnr)
     local buf = state.bufs[bufnr or vim.api.nvim_get_current_buf()]
     return buf and buf.generation or 0
+end
+
+--- Diff one buffer against `base` instead of the common base; nil goes
+--- back to it. `enable()` drops these.
+function M.set_buf_base(bufnr, base)
+    if not state.base then
+        return
+    end
+    detach(bufnr)
+    M.refresh(bufnr)
+    if state.bufs[bufnr] then
+        state.bufs[bufnr].base = base
+    end
 end
 
 function M.active()
