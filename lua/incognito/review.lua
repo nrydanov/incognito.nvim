@@ -297,8 +297,11 @@ local function remove_stale_worktrees(root, prefix)
     local out = git({ "worktree", "list", "--porcelain" }, root) or ""
     for path in out:gmatch("worktree ([^\n]+)") do
         local pid = vim.startswith(path, prefix) and tonumber(path:sub(#prefix + 1))
-        if pid and pid ~= vim.fn.getpid() and vim.uv.kill(pid, 0) ~= 0 then
-            git({ "worktree", "remove", "--force", path }, root)
+        if pid and pid ~= vim.fn.getpid() then
+            local _, _, code = vim.uv.kill(pid, 0)
+            if code == "ESRCH" then
+                git({ "worktree", "remove", "--force", path }, root)
+            end
         end
     end
 end
@@ -471,6 +474,14 @@ local function leave_commit_mode()
     commit_mode = nil
     vim.api.nvim_clear_autocmds({ group = "incognito" })
     move_windows(mode.worktree, mode.root)
+    -- A file can exist at the reviewed commit but be absent from the
+    -- checkout. Move its window before deleting the worktree buffer.
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        local bufnr = vim.api.nvim_win_get_buf(win)
+        if vim.fs.relpath(mode.worktree, vim.api.nvim_buf_get_name(bufnr)) then
+            vim.api.nvim_win_set_buf(win, vim.api.nvim_create_buf(true, false))
+        end
+    end
     for _, bufnr in ipairs(buffers_in(mode.worktree)) do
         vim.api.nvim_buf_delete(bufnr, { force = true })
     end
