@@ -99,6 +99,47 @@ function M.test_worktree_of_a_dead_session_is_removed()
     mr.off()
 end
 
+function M.test_worktree_with_inaccessible_live_pid_is_kept()
+    local dir = feature_repo()
+    local prefix = enter(dir):gsub("%d+$", "")
+    mr.off()
+
+    local proc = vim.system({ "true" })
+    proc:wait()
+    local other = prefix .. proc.pid
+    git({ "worktree", "add", "--quiet", "--detach", other, "HEAD" }, dir)
+
+    local kill = vim.uv.kill
+    vim.uv.kill = function(pid, signal)
+        if pid == proc.pid and signal == 0 then
+            return nil, "EPERM: operation not permitted", "EPERM"
+        end
+        return kill(pid, signal)
+    end
+    local ok, err = pcall(enter, dir)
+    vim.uv.kill = kill
+    assert(ok, err)
+    assert(vim.uv.fs_stat(other), "an inaccessible process may still be alive")
+    mr.off()
+    git({ "worktree", "remove", "--force", other }, dir)
+end
+
+function M.test_off_moves_window_when_commit_file_is_missing_from_checkout()
+    local dir = feature_repo()
+    commit(dir, "temporary.lua", "here\n", "add temporary file")
+    git({ "rm", "-q", "temporary.lua" }, dir)
+    git({ "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "remove temporary file" }, dir)
+    local commits = mr._mr_commits(dir)
+    mr._enter_commit_mode(dir, commits, 3)
+    local worktree = mr._commit_mode().worktree
+    vim.cmd("edit " .. vim.fn.fnameescape(vim.fs.joinpath(worktree, "temporary.lua")))
+
+    mr.off()
+    h.assert_eq(vim.api.nvim_buf_get_name(0), "", "window falls back to an empty buffer")
+    h.assert_eq(lines(), { "" })
+    h.assert_eq(vim.uv.fs_stat(worktree), nil, "worktree removed")
+end
+
 function M.test_commit_buffers_with_unsaved_edits_block_stepping()
     local dir = feature_repo()
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
