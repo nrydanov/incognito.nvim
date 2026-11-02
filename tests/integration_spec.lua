@@ -14,14 +14,13 @@ local function gitsigns_signs(bufnr)
     return #vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
 end
 
---- Open the sample file and wait until gitsigns has attached and drawn.
-local function open_sample()
+--- Open `a.lua` from `dir` (modified in the working tree) and wait until
+--- gitsigns has attached and drawn.
+local function open_file(dir)
     -- Wipe the previous repo's buffers first: gitsigns changes the base
     -- asynchronously across every attached buffer.
     vim.cmd("silent! %bwipeout!")
     mr.off()
-    local dir = h.repo({ ["a.lua"] = BASE })
-    h.write(dir, "a.lua", REFLOWED)
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
     local bufnr = vim.api.nvim_get_current_buf()
     assert(
@@ -31,6 +30,21 @@ local function open_sample()
         "gitsigns did not attach"
     )
     return bufnr
+end
+
+local function open_sample()
+    local dir = h.repo({ ["a.lua"] = BASE })
+    h.write(dir, "a.lua", REFLOWED)
+    return open_file(dir)
+end
+
+--- Two commits: line 2 changed in HEAD, line 3 added in the working tree.
+--- Against HEAD~1 both are marked, against HEAD only the third line.
+local function open_two_commits()
+    local dir = h.repo({ ["a.lua"] = "local a = 1\nlocal b = 2\n" })
+    h.commit(dir, { ["a.lua"] = "local a = 1\nlocal b = 9\n" })
+    h.write(dir, "a.lua", "local a = 1\nlocal b = 9\nlocal c = 3\n")
+    return dir, open_file(dir)
 end
 
 local function press(keys)
@@ -86,6 +100,37 @@ function M.test_gM_restores_gitsigns_after_either_mode()
     h.assert_eq(gs_config.signcolumn, true)
     h.assert_eq(sd.active(), false)
     h.assert_eq(h.marks(bufnr), {})
+end
+
+function M.test_on_after_structural_drops_structdiff_marks()
+    local bufnr = open_sample()
+    mr.on_structural("HEAD")
+    h.wait_run(bufnr)
+    mr.on("HEAD")
+    assert(
+        vim.wait(2000, function()
+            return gitsigns_signs(bufnr) > 0
+        end, 50),
+        "gitsigns signs should be back"
+    )
+
+    h.assert_eq(gs_config.linehl, true)
+    h.assert_eq(gs_config.signcolumn, true)
+    h.assert_eq(sd.active(), false)
+    h.assert_eq(h.marks(bufnr), {})
+end
+
+function M.test_base_change_keeps_structural_mode_on_the_new_base()
+    local dir, bufnr = open_two_commits()
+    mr.on_structural("HEAD~1")
+    h.wait_run(bufnr)
+    h.assert_eq(h.marks(bufnr), { [2] = "Change", [3] = "Add" })
+
+    mr._use_base(mr.repo_root(), "HEAD")
+    h.wait_run(bufnr)
+    h.assert_eq(sd.active(), true, "structural mode survives the base change")
+    h.assert_eq(h.marks(bufnr), { [3] = "Add" }, "marks follow the new base")
+    h.assert_eq(mr.load_state(vim.fn.resolve(dir))[".base"], "HEAD", "the base is remembered")
 end
 
 -- From an untouched line, [g lands on the reflow hunk under gitsigns but

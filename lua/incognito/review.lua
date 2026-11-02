@@ -246,7 +246,10 @@ end
 function M.on(target)
     local base, name = change_base(target)
     if base then
-        require("gitsigns").toggle_linehl(true)
+        require("incognito.structdiff").disable()
+        local gs = require("gitsigns")
+        gs.toggle_signs(true)
+        gs.toggle_linehl(true)
         vim.notify("Incognito: diffing against " .. name)
     end
 end
@@ -718,6 +721,19 @@ function M.step_commit(delta)
     show_commit(index)
 end
 
+-- Remember `rev` as the review base and re-enter the current mode on it.
+local function use_base(root, rev)
+    if not git({ "rev-parse", "--verify", "--quiet", rev }, root) then
+        return vim.notify("Incognito: unknown revision " .. rev, vim.log.levels.ERROR)
+    end
+    update_state(root, BASE_KEY, rev)
+    if require("incognito.structdiff").active() then
+        M.on_structural(rev)
+    else
+        M.on(rev)
+    end
+end
+
 --- Branch picker for the review base. Typed text that matches no branch is
 --- taken as a revision, so `HEAD~1` or a hash work as well.
 function M.set_base()
@@ -737,11 +753,7 @@ function M.set_base()
             if rev == "" then
                 return
             end
-            if not git({ "rev-parse", "--verify", "--quiet", rev }, root) then
-                return vim.notify("Incognito: unknown revision " .. rev, vim.log.levels.ERROR)
-            end
-            update_state(root, BASE_KEY, rev)
-            M.on(rev)
+            use_base(root, rev)
         end,
     })
 end
@@ -942,6 +954,7 @@ M.load_state = load_state
 M.save_state = save_state
 M.have_snacks = have_snacks
 M._reviewed_status = reviewed_status
+M._use_base = use_base
 M._mr_commits = mr_commits
 M._enter_commit_mode = enter_commit_mode
 M._map_line = map_line
