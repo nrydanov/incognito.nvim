@@ -37,7 +37,8 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
               taken as a revision, e.g. HEAD~1 or a hash.
   files       Picker of changed files with reviewed marks (✓ reviewed,
               ~ changed since marked).
-  commits     Picker of MR commits; selecting one enters commit mode,
+  commits     Picker of MR commits (✓ when all changed files are reviewed).
+              Selecting one enters commit mode,
               which checks that commit out in a separate worktree and
               opens the files from there. Your checkout is not touched.
   next        Next commit in commit mode.

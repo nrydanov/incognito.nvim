@@ -187,6 +187,45 @@ local function reviewed_status(root, target, files)
     return status
 end
 
+-- Compare reviewed content with the commit, independently of the working tree.
+local function commit_reviewed(root, sha, marks)
+    local out = git({
+        "diff-tree",
+        "--root",
+        "--no-commit-id",
+        "--raw",
+        "--no-abbrev",
+        "-M",
+        "--first-parent",
+        "-m",
+        "-r",
+        "-z",
+        sha,
+    }, root)
+    if not out or out == "" then
+        return false
+    end
+    local fields = vim.split(out, "\0", { trimempty = true })
+    local i = 1
+    while i < #fields do
+        local blob, status = fields[i]:match("^:%d+ %d+ %x+ (%x+) (%a)%d*$")
+        local paths = (status == "R" or status == "C") and 2 or 1
+        local mark = mark_of(marks, fields[i + paths])
+        i = i + 1 + paths
+        if not blob or not mark then
+            return false
+        end
+        if status == "D" then
+            if mark.blob or mark.head ~= sha then
+                return false
+            end
+        elseif M.status_symbol(mark, blob) ~= "✓" then
+            return false
+        end
+    end
+    return true
+end
+
 local function rel_path(root)
     local name = vim.api.nvim_buf_get_name(0)
     if name == "" then
@@ -670,9 +709,16 @@ function M.commits()
         return vim.notify("Incognito: no commits on top of " .. resolve_target(root), vim.log.levels.WARN)
     end
 
+    local marks = load_state(root)[resolve_target(root)] or {}
     local items = {}
     for i, c in ipairs(commits) do
-        items[i] = { text = c.short .. " " .. c.subject, index = i, sha = c.sha, cwd = root }
+        items[i] = {
+            text = c.short .. " " .. c.subject,
+            index = i,
+            sha = c.sha,
+            cwd = root,
+            reviewed = commit_reviewed(root, c.sha, marks),
+        }
     end
     Snacks.picker.pick({
         source = "mr_commits",
@@ -682,6 +728,7 @@ function M.commits()
             local c = commits[item.index]
             local current = commit_mode and commit_mode.index == item.index
             return {
+                { item.reviewed and "✓ " or "  ", "SnacksPickerGitStatusAdded" },
                 {
                     ("%d/%d"):format(item.index, #commits),
                     current and "SnacksPickerGitBranchCurrent" or "SnacksPickerComment",
@@ -954,6 +1001,7 @@ M.load_state = load_state
 M.save_state = save_state
 M.have_snacks = have_snacks
 M._reviewed_status = reviewed_status
+M._commit_reviewed = commit_reviewed
 M._use_base = use_base
 M._mr_commits = mr_commits
 M._enter_commit_mode = enter_commit_mode
