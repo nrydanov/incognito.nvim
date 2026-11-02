@@ -746,10 +746,14 @@ function M.commits()
             reviewed = commit_reviewed(root, c.sha, marks_for(state, target, c.sha)),
         }
     end
+    local current_index = commit_mode and commit_mode.index or 1
     Snacks.picker.pick({
         source = "mr_commits",
         title = "MR commits",
         items = items,
+        on_show = function(picker)
+            picker.list:view(current_index)
+        end,
         format = function(item)
             local c = commits[item.index]
             local current = commit_mode and commit_mode.index == item.index
