@@ -99,6 +99,29 @@ function M.test_existing_commit_mark_is_preserved_and_can_be_removed()
     mr.off()
 end
 
+function M.test_commits_picker_opens_on_the_current_commit()
+    local dir = feature_repo()
+    vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
+    enter(dir)
+    mr.step_commit(1)
+    mr.commits()
+    local picker = Snacks.picker.get({ source = "mr_commits" })[1]
+    local ok, err = pcall(function()
+        assert(picker, "commits picker is open")
+        assert(
+            vim.wait(2000, function()
+                return picker:current() and picker:current().index == 2
+            end, 20),
+            "picker should select the second commit"
+        )
+    end)
+    if picker then
+        picker:close()
+    end
+    mr.off()
+    assert(ok, err)
+end
+
 function M.test_commit_mode_leaves_the_checkout_alone()
     local dir = feature_repo()
     -- Neither uncommitted nor unsaved changes stop commit mode now.
