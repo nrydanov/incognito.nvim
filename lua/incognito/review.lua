@@ -1,4 +1,14 @@
 local M = {}
+-- Commit mode: one commit of the MR is checked out in a worktree of its own
+-- and diffed against its parent, so the buffers show exactly what that
+-- commit changed while the user's checkout (HEAD, index, files) stays put.
+-- { root = the user's checkout, worktree, commits = { {sha, short, subject} }
+-- oldest first, index = current commit, base = its parent, linked = paths
+-- symlinked from the checkout, tip = { [bufnr] = sha | false } buffers of
+-- the checkout switched to with toggle_tip: diffed against the commit, the
+-- sha once gitsigns took it }
+---@type table?
+local commit_mode = nil
 
 M.config = {
     remote = "origin",
@@ -173,8 +183,34 @@ function M.status_symbol(mark, blob)
     return mark.blob == blob and "✓" or "~"
 end
 
+-- Commit review marks share the state file, but not the MR-wide file records.
+local function marks_for(state, target, sha)
+    if not sha then
+        return state[target] or {}
+    end
+    local commits = (state[".commits"] or {})[target] or {}
+    if commits[sha] then
+        return commits[sha]
+    end
+    -- Keep existing marks only for the commit at which they were recorded.
+    local marks = {}
+    for file in pairs(state[target] or {}) do
+        local mark = mark_of(state[target], file)
+        if mark.head == sha then
+            marks[file] = mark
+        end
+    end
+    return marks
+end
+
+local function review_sha(root)
+    if commit_mode and root == commit_mode.worktree then
+        return commit_mode.commits[commit_mode.index].sha
+    end
+end
+
 local function reviewed_status(root, target, files)
-    local marks = load_state(root)[target] or {}
+    local marks = marks_for(load_state(root), target, review_sha(root))
     local marked = vim.tbl_filter(function(file)
         return marks[file] ~= nil
     end, files)
@@ -233,17 +269,6 @@ local function rel_path(root)
     end
     return vim.fs.relpath(root, name)
 end
-
--- Commit mode: one commit of the MR is checked out in a worktree of its own
--- and diffed against its parent, so the buffers show exactly what that
--- commit changed while the user's checkout (HEAD, index, files) stays put.
--- { root = the user's checkout, worktree, commits = { {sha, short, subject} }
--- oldest first, index = current commit, base = its parent, linked = paths
--- symlinked from the checkout, tip = { [bufnr] = sha | false } buffers of
--- the checkout switched to with toggle_tip: diffed against the commit, the
--- sha once gitsigns took it }
----@type table?
-local commit_mode = nil
 
 -- In commit mode the review runs in the worktree, also when the current
 -- buffer is a file of the user's checkout.
@@ -709,7 +734,8 @@ function M.commits()
         return vim.notify("Incognito: no commits on top of " .. resolve_target(root), vim.log.levels.WARN)
     end
 
-    local marks = load_state(root)[resolve_target(root)] or {}
+    local state = load_state(root)
+    local target = resolve_target(root)
     local items = {}
     for i, c in ipairs(commits) do
         items[i] = {
@@ -717,7 +743,7 @@ function M.commits()
             index = i,
             sha = c.sha,
             cwd = root,
-            reviewed = commit_reviewed(root, c.sha, marks),
+            reviewed = commit_reviewed(root, c.sha, marks_for(state, target, c.sha)),
         }
     end
     Snacks.picker.pick({
@@ -826,12 +852,18 @@ local function set_reviewed(root, target, reviewed)
     local head = git({ "rev-parse", "HEAD" }, root)
     local ids = blob_ids(root, vim.tbl_keys(reviewed))
     local state = load_state(root)
-    state[target] = state[target] or {}
+    local sha = review_sha(root)
+    local marks = marks_for(state, target, sha)
     for file, on in pairs(reviewed) do
-        state[target][file] = on and { blob = ids[file], head = head } or nil
+        marks[file] = on and { blob = ids[file], head = head } or nil
     end
-    if vim.tbl_isempty(state[target]) then
-        state[target] = nil
+    if sha then
+        state[".commits"] = state[".commits"] or {}
+        state[".commits"][target] = state[".commits"][target] or {}
+        -- Keep an empty entry so removing a mark cannot revive a legacy mark.
+        state[".commits"][target][sha] = marks
+    else
+        state[target] = not vim.tbl_isempty(marks) and marks or nil
     end
     save_state(root, state)
 end
@@ -856,7 +888,7 @@ function M.since_review(target)
     local root = repo_root()
     target = target or resolve_target(root)
     local file = rel_path(root)
-    local mark = file and mark_of(load_state(root)[target] or {}, file)
+    local mark = file and mark_of(marks_for(load_state(root), target, review_sha(root)), file)
     local sha = mark and mark.head
     if not sha then
         return vim.notify("Incognito: " .. (file or "buffer") .. " was never reviewed", vim.log.levels.WARN)
