@@ -19,7 +19,7 @@ M.config = { difft_cmd = "difft", debounce_ms = 300 }
 -- state.split: render the base file as a pane to the right of every line
 -- state.bufs[bufnr] = { base, hunks, base_file, base_text, base_lines, captures, timer, run_id, generation, result }
 -- (`base` overrides state.base for that buffer)
-local state = { base = nil, show_deleted = false, split = false, wrap = {}, bufs = {} }
+local state = { base = nil, show_deleted = false, split = false, wrap = {}, roots = {}, bufs = {} }
 local resize_timer = vim.uv.new_timer()
 local RESIZE_MS = 100
 
@@ -63,6 +63,19 @@ local function rename_source(rel, dir, base)
     return nil
 end
 
+-- Whether `base` is a commit of the repository at `root`, cached per
+-- repository and revision. A buffer from another repository has no base to diff against;
+-- treating it as a new file would mark every line as added.
+local function base_in_repo(root, base)
+    if state.roots[root .. ":" .. base] == nil then
+        state.roots[root .. ":" .. base] = git({ "cat-file", "-e", base .. "^{commit}" }, root) ~= nil
+        if not state.roots[root .. ":" .. base] then
+            vim.notify("Incognito: " .. root .. " has no commit " .. base .. ", skipped", vim.log.levels.WARN)
+        end
+    end
+    return state.roots[root .. ":" .. base]
+end
+
 -- Content of the file at its base, written once per buffer and cached.
 local function base_file(bufnr)
     local buf = state.bufs[bufnr]
@@ -73,11 +86,11 @@ local function base_file(bufnr)
     local dir = vim.fs.dirname(name)
     -- `.git` is a directory in a clone and a file in a worktree; both match.
     local root = vim.fs.root(name, ".git")
-    if not root then
+    local base = buf.base or state.base
+    if not root or not base_in_repo(root, base) then
         return nil
     end
     local rel = vim.fs.relpath(root, name)
-    local base = buf.base or state.base
     local content = rel and git({ "show", base .. ":" .. rel }, dir)
     if rel and not content then
         -- Not at this path in the base: maybe it was renamed since.
@@ -612,6 +625,7 @@ function M.enable(base)
         return vim.notify("structdiff: difft not found in PATH", vim.log.levels.ERROR)
     end
     reset()
+    state.roots = {}
     state.base = base
 
     vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {

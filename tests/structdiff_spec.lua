@@ -264,6 +264,22 @@ function M.test_file_outside_repo_is_ignored()
     h.assert_eq(sd._generation(bufnr), 0, "no difft run for a file outside git")
 end
 
+-- A buffer from a repository that lacks the base revision: no marks at
+-- all, instead of every line marked as added.
+function M.test_base_missing_in_repo_is_skipped()
+    sd.disable()
+    local other = h.repo({ ["b.lua"] = "local b = 1\n" })
+    local sha = vim.trim(vim.system({ "git", "rev-parse", "HEAD" }, { cwd = other, text = true }):wait().stdout)
+    local dir = h.repo({ ["a.lua"] = "local a = 1\n" })
+    h.write(dir, "a.lua", "local a = 2\n")
+    vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
+    local bufnr = vim.api.nvim_get_current_buf()
+    sd.enable(sha)
+    vim.wait(600)
+    h.assert_eq(h.marks(bufnr), {})
+    h.assert_eq(sd._generation(bufnr), 0, "no difft run against a revision the repository lacks")
+end
+
 function M.test_scratch_buffer_is_ignored()
     sd.disable()
     vim.cmd("enew!")
