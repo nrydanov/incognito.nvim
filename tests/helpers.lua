@@ -24,12 +24,16 @@ function M.repo(files)
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
     sh({ "git", "init", "-q" }, dir)
+    M.commit(dir, files)
+    return dir
+end
+
+function M.commit(dir, files)
     for name, text in pairs(files) do
         M.write(dir, name, text)
     end
     sh({ "git", "add", "-A" }, dir)
     sh({ "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init", "--allow-empty" }, dir)
-    return dir
 end
 
 function M.write(dir, name, text)
