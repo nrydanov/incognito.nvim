@@ -48,7 +48,8 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
               line of code. The working tree file is diffed against the
               commit, so its signs show what changed after it. Renames
               are followed; a file deleted later is reported.
-  reviewed    Toggle the reviewed mark of the current file.
+  reviewed    Toggle the reviewed mark of the current file. In commit mode,
+              marks are stored separately for each commit and target.
   since       Diff the current file against the commit it was reviewed at.
   deleted     Toggle deleted lines (structural mode).
   split       Toggle the side-by-side base pane (structural mode).

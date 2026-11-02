@@ -44,6 +44,61 @@ local function enter(dir)
     return assert(mr._commit_mode(), "commit mode is on").worktree
 end
 
+function M.test_review_marks_survive_switching_between_commits()
+    local dir = feature_repo()
+    vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
+    local worktree = enter(dir)
+    mr.toggle_reviewed("main")
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], "✓")
+    mr.step_commit(1)
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], " ")
+    mr.toggle_reviewed("main")
+    mr.step_commit(-1)
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], "✓")
+    mr.step_commit(1)
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], "✓")
+    local previous, captured = Snacks
+    Snacks = { picker = {
+        pick = function(opts)
+            captured = opts
+        end,
+    } }
+    local ok, err = pcall(function()
+        mr.commits()
+        h.assert_eq(captured.items[1].reviewed, true)
+        h.assert_eq(captured.items[2].reviewed, true)
+        mr.toggle_reviewed("main")
+        mr.commits()
+        h.assert_eq(captured.items[1].reviewed, true)
+        h.assert_eq(captured.items[2].reviewed, false)
+    end)
+    Snacks = previous
+    mr.off()
+    h.assert_eq(mr._reviewed_status(dir, "main", { "a.lua" })["a.lua"], " ", "MR marks stay separate")
+    assert(ok, err)
+end
+
+function M.test_existing_commit_mark_is_preserved_and_can_be_removed()
+    local dir = feature_repo()
+    vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
+    local commits = mr._mr_commits(dir)
+    local sha = commits[1].sha
+    local blob = git({ "rev-parse", sha .. ":a.lua" }, dir)
+    mr.save_state(dir, { main = { ["a.lua"] = { head = sha, blob = blob } } })
+    local worktree = enter(dir)
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], "✓")
+    mr.step_commit(1)
+    mr.toggle_reviewed("main")
+    mr.step_commit(-1)
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], "✓")
+    mr.toggle_reviewed("main")
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], " ")
+    mr.step_commit(1)
+    mr.step_commit(-1)
+    h.assert_eq(mr._reviewed_status(worktree, "main", { "a.lua" })["a.lua"], " ")
+    mr.off()
+end
+
 function M.test_commit_mode_leaves_the_checkout_alone()
     local dir = feature_repo()
     -- Neither uncommitted nor unsaved changes stop commit mode now.
