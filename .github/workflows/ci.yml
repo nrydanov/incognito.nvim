@@ -17,6 +17,12 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: [v0.11.7, stable, nightly]
+    # nightly may break; it must not fail the run.
+    continue-on-error: ${{ matrix.neovim == 'nightly' }}
     env:
       DIFFT_VERSION: 0.71.0
       INCOGNITO_DEPS: ${{ github.workspace }}/deps
@@ -25,6 +31,7 @@ jobs:
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
+          version: ${{ matrix.neovim }}
       - name: Install difftastic
         run: |
           curl -fsSL "https://github.com/Wilfred/difftastic/releases/download/${DIFFT_VERSION}/difft-${DIFFT_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
