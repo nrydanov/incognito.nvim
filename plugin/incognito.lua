@@ -3,6 +3,8 @@ if vim.g.loaded_incognito then
 end
 vim.g.loaded_incognito = true
 
+require("incognito.keymaps").setup(require("incognito").config.keymaps)
+
 -- Each handler gets the optional argument after the subcommand.
 local subcommands = {
     on = function(arg)

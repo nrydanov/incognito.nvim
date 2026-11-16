@@ -97,6 +97,7 @@ Reopening the same R resumes its previous N and disk/index without reset.
     require("incognito").setup({
         remote = "origin",
         targets = { "main", "master" },
+        keymaps = { prefix = "<leader>i" }, -- false disables defaults
         commit_mode = {
             -- worktree_dir = "/absolute/canonical/path/to/reviews",
             link = {},
@@ -106,6 +107,28 @@ Reopening the same R resumes its previous N and disk/index without reset.
         difft = { cmd = "difft", debounce_ms = 300 },
     })
 <
+DEFAULT KEYS                                                *incognito-keymaps*
+
+Normal-mode defaults are installed when the plugin loads, even without setup().
+Set mapleader before loading the plugin. With Space as leader, <leader>ih means
+Space ih. For lazy.nvim, use `lazy = false, opts = {}` to install keys at startup;
+command-only lazy loading installs them only after the plugin is loaded.
+
+  <leader>io / <leader>iq   Review on / off
+  <leader>is               Structural review
+  <leader>ib / <leader>ih   Choose base / head
+  <leader>if / <leader>ic   Changed files / commits
+  <leader>ir               Clean range diff
+  <leader>in / <leader>ip   Next / previous commit
+  <leader>it               Switch between Review and Source
+  <leader>iv / <leader>iV   Toggle reviewed / changes since review
+  <leader>id / <leader>iw   Deleted lines / diff window (structural mode)
+
+Existing mappings on these keys are preserved. Change the prefix with
+`keymaps = { prefix = "<leader>m" }`, or disable all defaults with `keymaps = false`.
+Repeated setup() removes only mappings still owned by Incognito, keeping user
+replacements. Commands and Lua functions remain available for custom mappings.
+
 `commit_mode.link` names ignored directories of your checkout, at any
 depth, that are symlinked into the commit mode worktree. When a commit's
 `commit_mode.lockfiles` differ from your checkout, a warning says that the

@@ -41,23 +41,41 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
     "nrydanov/incognito.nvim",
     dependencies = { "lewis6991/gitsigns.nvim", "folke/snacks.nvim" },
+    lazy = false, -- Install the default keys at startup.
     opts = {},
-    keys = {
-        { "<leader>gm", function() require("incognito").on() end, desc = "MR review on" },
-        { "<leader>gd", function() require("incognito").structural() end, desc = "MR review on (structural)" },
-        { "<leader>gM", function() require("incognito").off() end, desc = "MR review off" },
-        { "<leader>gb", function() require("incognito").base() end, desc = "MR review base" },
-        { "<leader>gh", function() require("incognito").change_head() end, desc = "MR review head" },
-        { "<leader>gf", function() require("incognito").files() end, desc = "MR changed files" },
-        { "<leader>gk", function() require("incognito").commits() end, desc = "MR commits" },
-        { "]C", function() require("incognito").next_commit() end, desc = "MR next commit" },
-        { "[C", function() require("incognito").prev_commit() end, desc = "MR previous commit" },
-        { "<leader>gt", function() require("incognito").toggle_tip() end, desc = "MR commit / working tree" },
-        { "<leader>gv", function() require("incognito").toggle_reviewed() end, desc = "MR toggle reviewed" },
-        { "<leader>gV", function() require("incognito").since_review() end, desc = "MR diff since review" },
-    },
 }
 ```
+
+### Default keys
+
+Normal-mode mappings use `<leader>i` for Incognito. Set `vim.g.mapleader`
+before loading the plugin; with Space as leader, head selection is `Space ih`.
+
+| Keys | Action |
+|------|--------|
+| `<leader>io` / `<leader>iq` | Turn review on / off |
+| `<leader>is` | Structural review |
+| `<leader>ib` / `<leader>ih` | Choose base / head |
+| `<leader>if` / `<leader>ic` | Changed files / commits |
+| `<leader>ir` | Clean range diff |
+| `<leader>in` / `<leader>ip` | Next / previous commit |
+| `<leader>it` | Switch between Review and Source |
+| `<leader>iv` / `<leader>iV` | Toggle reviewed / changes since review |
+| `<leader>id` / `<leader>iw` | Toggle deleted lines / diff window (structural mode) |
+
+Existing mappings on those keys are kept. All defaults have descriptions for
+keymap pickers. The commands and Lua functions remain available for custom keys.
+
+```lua
+require("incognito").setup({ keymaps = { prefix = "<leader>m" } })
+-- Or disable the entire default set:
+require("incognito").setup({ keymaps = false })
+```
+
+Calling `setup()` again updates only mappings still owned by Incognito; user
+replacements are kept. If you use command-only lazy loading, the defaults become
+available only after the plugin loads. Use `lazy = false` as above for startup keys,
+or disable defaults and provide your own lazy.nvim `keys` entries.
 
 ### Hunk navigation with gitsigns
 
@@ -120,6 +138,7 @@ Defaults:
 require("incognito").setup({
     remote = "origin",               -- remote whose HEAD names the target
     targets = { "main", "master" },  -- fallback target names
+    keymaps = { prefix = "<leader>i" }, -- false disables default mappings
     commit_mode = {
         -- Default parent: <canonical-source-path>.incognito, beside Source.
         -- worktree_dir = "/absolute/canonical/path/to/reviews",
