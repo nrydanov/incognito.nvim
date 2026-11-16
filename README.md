@@ -140,7 +140,7 @@ require("incognito").setup({
     targets = { "main", "master" },  -- fallback target names
     keymaps = { prefix = "<leader>i" }, -- false disables default mappings
     commit_mode = {
-        -- Default parent: <canonical-source-path>.incognito, beside Source.
+        -- Default: <git-common-dir>/incognito/<branch>-<hash>.
         -- worktree_dir = "/absolute/canonical/path/to/reviews",
         -- Optional shared dependencies: NOT a sandbox; external writes hit Source.
         link = {},
@@ -237,9 +237,22 @@ Existing commands, Lua APIs and reviewed-state JSON remain supported.
 
 ### Safety and external tools
 
-Default location is a sibling `<Source>.incognito/<repository+owner hash>`;
-`commit_mode.worktree_dir` changes the parent. It must be a canonical,
-non-symlink path outside Source. Changing this setting never migrates or deletes
+New Reviews live in `<git-common-dir>/incognito/<branch>-<hash>`, normally
+`.git/incognito/feature-name-a1b2c3d4e5f6/`. Branch names are sanitized and
+shortened; the hash distinguishes owners with similar names. Git's own
+`.git/worktrees/` remains reserved for administrative files. Review files under
+`.git` cannot be staged in Source, and no sibling directories are created.
+For linked Source worktrees, the common Git directory belongs to the shared repository.
+`git worktree list` shows the full Review paths; the editor's working directory
+is unchanged, so launch agents explicitly in the desired Review directory.
+
+Existing Reviews at `<Source>.incognito/<repository+owner hash>` or
+`stdpath("data")/incognito/worktrees/<repository+owner hash>` are reopened in
+place when no custom directory is configured; they are not moved automatically.
+`commit_mode.worktree_dir` selects a custom parent and retains hash-only names.
+It must be a canonical, non-symlink path outside any checkout and Git metadata,
+with `<git-common-dir>/incognito` as the sole exception.
+Changing this setting never migrates or deletes
 an old Review. A manifest under `<git-common-dir>/incognito-reviews/` records
 identity, Source/Review paths, target/L/R/N and transition phase. Old scratch
 worktrees and unknown directories are not adopted or garbage-collected.
