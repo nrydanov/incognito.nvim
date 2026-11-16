@@ -41,6 +41,13 @@ local function inside(root, path)
     return path == root or vim.startswith(path, root .. "/")
 end
 
+local function safe_layout(source, common, path)
+    -- Only our dedicated checkout directory may be nested in Git metadata.
+    -- In particular, never use Git's administrative `worktrees/` directory.
+    local private = vim.fs.dirname(path) == vim.fs.joinpath(common, "incognito")
+    return not inside(path, source) and (private or (not inside(source, path) and not inside(common, path)))
+end
+
 local function plain_path(path)
     if type(path) ~= "string" or path:sub(1, 1) ~= "/" then
         return nil, "Review path must be absolute"
@@ -138,7 +145,7 @@ function M.validate(ws)
     if not plain_path(ws.manifest) or not plain_path(d.gitdir or "") then
         return nil, "symlink in Review metadata"
     end
-    if uv.fs_realpath(d.path) ~= d.path or inside(d.source, d.path) or inside(d.path, d.source) then
+    if uv.fs_realpath(d.path) ~= d.path or not safe_layout(d.source, d.common, d.path) then
         return nil, "unsafe Review/Source paths"
     end
     local common = git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, d.path)
@@ -406,26 +413,45 @@ function M.open(source, owner, range, config)
     -- JSON keeps path/owner boundaries unambiguous without passing a NUL-containing
     -- Lua string as a Blob to sha256() on Neovim 0.11.
     local id = vim.fn.sha256(vim.json.encode({ common, owner }))
-    local parent = config.worktree_dir or (source .. ".incognito")
-    parent = vim.fs.normalize(vim.fn.fnamemodify(parent, ":p")):gsub("/$", "")
-    local path = vim.fs.joinpath(parent, id:sub(1, 24))
-    local ok, err = plain_path(path)
+    local meta = vim.fs.joinpath(common, "incognito-reviews")
+    local ok, err = plain_path(meta)
     if not ok then
         return nil, err
     end
-    if vim.fs.root(parent, ".git") then
+    local manifest = vim.fs.joinpath(meta, id .. ".json")
+    local private = vim.fs.joinpath(common, "incognito")
+    local parent = config.worktree_dir or private
+    local name = id:sub(1, 24)
+    if not config.worktree_dir then
+        local branch = owner:gsub("^refs/heads/", ""):gsub("[^%w._-]", "-"):sub(1, 64)
+        name = branch .. "-" .. id:sub(1, 12)
+        -- Keep earlier default locations accessible without moving saved experiments.
+        -- The manifest and Git ownership are fully validated below before use.
+        local saved = read(manifest)
+        for _, legacy in ipairs({
+            source .. ".incognito",
+            vim.fs.joinpath(vim.fn.stdpath("data"), "incognito", "worktrees"),
+        }) do
+            if saved and saved.path == vim.fs.joinpath(legacy, id:sub(1, 24)) then
+                parent, name = legacy, id:sub(1, 24)
+                break
+            end
+        end
+    end
+    parent = vim.fs.normalize(vim.fn.fnamemodify(parent, ":p")):gsub("/$", "")
+    local path = vim.fs.joinpath(parent, name)
+    ok, err = plain_path(path)
+    if not ok then
+        return nil, err
+    end
+    if (parent ~= private and vim.fs.root(parent, ".git")) or uv.fs_lstat(vim.fs.joinpath(parent, ".git")) then
         return nil, "Review parent must be outside any Git checkout"
     end
-    if inside(source, path) or inside(path, source) then
-        return nil, "Review must be outside Source"
-    end
-    local meta = vim.fs.joinpath(common, "incognito-reviews")
-    ok, err = plain_path(meta)
-    if not ok then
-        return nil, err
+    if not safe_layout(source, common, path) then
+        return nil, "Review must be outside Source and Git metadata, except <git-common-dir>/incognito"
     end
     vim.fn.mkdir(meta, "p")
-    local ws = { manifest = vim.fs.joinpath(meta, id .. ".json"), lock = vim.fs.joinpath(meta, id .. ".lock") }
+    local ws = { manifest = manifest, lock = vim.fs.joinpath(meta, id .. ".lock") }
     local cached = held[ws.manifest]
     if cached then
         if cached.data.path ~= path or cached.data.source ~= source then

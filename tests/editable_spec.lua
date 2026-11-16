@@ -29,6 +29,57 @@ local function data(root, name)
     return table.concat(vim.fn.readfile(root .. "/" .. name), "\n")
 end
 
+function M.test_default_worktree_is_private_and_cannot_be_staged_in_source()
+    local dir = fixture()
+    local mode = enter_first(dir)
+    local common = git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, dir)
+    h.assert_eq(vim.fs.dirname(mode.worktree), common .. "/incognito")
+    assert(vim.fs.basename(mode.worktree):match("^feature%-%x+$"), "readable owner name")
+    assert(vim.startswith(mode.ws.data.gitdir, common .. "/worktrees/"), "Git owns the administrative directory")
+    assert(wsmod.validate(mode.ws))
+    assert(not vim.uv.fs_lstat(dir .. ".incognito"), "no sibling directory created")
+    h.write(mode.worktree, "experiment.lua", "review only\n")
+    git({ "add", "-A" }, dir)
+    h.assert_eq(git({ "status", "--porcelain" }, dir), "", "Source cannot stage Review files")
+    mr.off()
+end
+
+function M.test_worktree_names_distinguish_branches_with_the_same_slug()
+    local dir = fixture()
+    git({ "branch", "topic/name" }, dir)
+    git({ "branch", "topic-name" }, dir)
+    assert(mr.change_head("topic/name"))
+    local first = mr._commit_mode().worktree
+    assert(mr.change_head("topic-name"))
+    local second = mr._commit_mode().worktree
+    assert(vim.fs.basename(first):match("^topic%-name%-%x+$"))
+    assert(vim.fs.basename(second):match("^topic%-name%-%x+$"))
+    assert(first ~= second, "sanitized names cannot share a Review")
+    mr.off()
+end
+
+function M.test_linked_source_uses_common_git_directory_for_review()
+    local dir = fixture()
+    local linked = vim.fn.tempname()
+    git({ "worktree", "add", "--quiet", "-b", "linked-feature", linked, "feature" }, dir)
+    linked = assert(vim.uv.fs_realpath(linked))
+    vim.cmd("edit! " .. vim.fn.fnameescape(linked .. "/a.lua"))
+    local mode = enter_first(linked)
+    h.assert_eq(vim.fs.dirname(mode.worktree), dir .. "/.git/incognito")
+    assert(wsmod.validate(mode.ws))
+    mr.off()
+end
+
+function M.test_custom_worktree_cannot_use_checkout_or_git_administrative_paths()
+    local dir = fixture()
+    local range = mr._range_for(dir)
+    for _, parent in ipairs({ dir .. "/reviews", dir .. "/.git", dir .. "/.git/worktrees", dir .. "/.git/objects" }) do
+        local ws = wsmod.open(dir, range.owner, range, { worktree_dir = parent })
+        assert(not ws, "unsafe Review parent accepted: " .. parent)
+    end
+    h.assert_eq(git({ "status", "--porcelain" }, dir), "")
+end
+
 function M.test_step_resets_index_untracked_and_undo_but_keeps_ignored()
     local dir = fixture()
     local cwd = vim.uv.cwd()
@@ -392,6 +443,32 @@ local mr = require("incognito.review")
     return script, root
 end
 
+function M.test_legacy_sibling_review_reopens_without_moving_saved_edits()
+    local dir = fixture()
+    local script, root = child_script(
+        dir,
+        ([[
+mr.config.commit_mode.worktree_dir = %q
+assert(mr.change_head("feature"))
+local m = mr._commit_mode()
+vim.fn.writefile({"legacy experiment"}, m.worktree .. "/a.lua")
+assert(mr.git({"add", "a.lua"}, m.worktree))
+vim.cmd("qa!")
+]]):format(dir .. ".incognito")
+    )
+    local result = vim.system(
+        { vim.v.progpath, "--headless", "--clean", "-u", root .. "/tests/minimal_init.lua", "-l", script },
+        { text = true }
+    ):wait(15000)
+    h.assert_eq(result.code, 0, result.stderr)
+    assert(mr.change_head("feature"))
+    local path = mr._commit_mode().worktree
+    h.assert_eq(vim.fs.dirname(path), dir .. ".incognito")
+    h.assert_eq(data(path, "a.lua"), "legacy experiment")
+    assert(git({ "diff", "--cached", "--name-only" }, path) ~= "", "staged edit survives")
+    mr.off()
+end
+
 function M.test_exit_crash_reopen_and_exclusive_lock_across_processes()
     for _, crash in ipairs({ false, true }) do
         local dir = fixture()
@@ -580,7 +657,7 @@ function M.test_unowned_path_collision_and_pid_reuse_are_safe()
     local range = mr._range_for(dir)
     local common = git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, dir)
     local id = vim.fn.sha256(vim.json.encode({ common, range.owner }))
-    local path = dir .. ".incognito/" .. id:sub(1, 24)
+    local path = vim.fs.joinpath(common, "incognito", "feature-" .. id:sub(1, 12))
     h.write(path, "foreign", "do not remove\n")
     assert(not mr.change_head("feature"))
     h.assert_eq(data(path, "foreign"), "do not remove")
