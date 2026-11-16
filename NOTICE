@@ -1,0 +1,15 @@
+incognito.nvim
+Copyright (c) 2026 Nikita Rydanov and contributors
+
+incognito.nvim is distributed as a whole under the GNU General Public License,
+version 3 or (at your option) any later version (GPL-3.0-or-later). See LICENSE
+for the full terms, including the disclaimer of warranty.
+
+The project was previously distributed under the MIT License. Existing MIT
+permissions for that earlier code remain intact; its original copyright and
+permission notice is preserved in LICENSES/MIT.txt. This retained notice does
+not offer an MIT licensing option for later GPL-only additions.
+
+Contributors include Kudyakov Artem, whose contributions are recorded in the
+Git history. Existing releases, including v0.2.0, retain their MIT license;
+this change does not alter their tags or license grants.

@@ -83,4 +83,4 @@ review directory explicitly; find it with `git worktree list`.
 - `:help incognito-limitations` — persistence, locks and external tools
 - `:help incognito-development` — tests and linting
 
-[MIT](LICENSE)
+[GNU GPL v3.0 or later](LICENSE) (`GPL-3.0-or-later`). See [notices](NOTICE) for attribution and retained MIT terms.
