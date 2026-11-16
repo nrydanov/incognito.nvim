@@ -130,11 +130,13 @@ function M.test_commit_mode_leaves_the_checkout_alone()
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
     local user_buf = vim.api.nvim_get_current_buf()
     vim.api.nvim_buf_set_lines(user_buf, 0, -1, false, { "unsaved" })
+    local source_status = git({ "status", "--porcelain", "--untracked-files=all" }, dir)
 
     local worktree = enter(dir)
     h.assert_eq(vim.api.nvim_buf_get_name(0), vim.fs.joinpath(worktree, "a.lua"), "window shows the commit")
     h.assert_eq(lines(), { "v1" })
-    h.assert_eq(vim.fs.relpath(dir, worktree), nil, "worktree is outside the repository")
+    local common = git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, dir)
+    h.assert_eq(vim.fs.dirname(worktree), common .. "/incognito", "Review is in dedicated Git metadata")
 
     mr.step_commit(1)
     h.assert_eq(lines(), { "v2" }, "stepping checks out the next commit in the worktree")
@@ -142,6 +144,11 @@ function M.test_commit_mode_leaves_the_checkout_alone()
     h.assert_eq(git({ "symbolic-ref", "HEAD" }, dir), "refs/heads/feature", "HEAD stays on the branch")
     h.assert_eq(vim.fn.readfile(vim.fs.joinpath(dir, "a.lua")), { "dirty" }, "working tree untouched")
     h.assert_eq(lines(user_buf), { "unsaved" }, "user buffer untouched")
+    h.assert_eq(
+        git({ "status", "--porcelain", "--untracked-files=all" }, dir),
+        source_status,
+        "Source status unchanged"
+    )
 
     -- From a buffer of the checkout, the review still means the commit.
     vim.api.nvim_set_current_buf(user_buf)
