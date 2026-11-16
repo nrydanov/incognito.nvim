@@ -403,7 +403,9 @@ function M.open(source, owner, range, config)
     if not common or not owner then
         return nil, "Source and branch owner are required"
     end
-    local id = vim.fn.sha256(common .. "\0" .. owner)
+    -- JSON keeps path/owner boundaries unambiguous without passing a NUL-containing
+    -- Lua string as a Blob to sha256() on Neovim 0.11.
+    local id = vim.fn.sha256(vim.json.encode({ common, owner }))
     local parent = config.worktree_dir or (source .. ".incognito")
     parent = vim.fs.normalize(vim.fn.fnamemodify(parent, ":p")):gsub("/$", "")
     local path = vim.fs.joinpath(parent, id:sub(1, 24))
@@ -511,7 +513,7 @@ function M.peek(source, owner)
     if not common then
         return nil
     end
-    local id = vim.fn.sha256(common .. "\0" .. owner)
+    local id = vim.fn.sha256(vim.json.encode({ common, owner }))
     return read(vim.fs.joinpath(common, "incognito-reviews", id .. ".json"))
 end
 
