@@ -68,9 +68,9 @@ end
 -- treating it as a new file would mark every line as added.
 local function base_in_repo(root, base)
     if state.roots[root .. ":" .. base] == nil then
-        state.roots[root .. ":" .. base] = git({ "cat-file", "-e", base .. "^{commit}" }, root) ~= nil
+        state.roots[root .. ":" .. base] = git({ "cat-file", "-e", base .. "^{tree}" }, root) ~= nil
         if not state.roots[root .. ":" .. base] then
-            vim.notify("Incognito: " .. root .. " has no commit " .. base .. ", skipped", vim.log.levels.WARN)
+            vim.notify("Incognito: " .. root .. " has no tree " .. base .. ", skipped", vim.log.levels.WARN)
         end
     end
     return state.roots[root .. ":" .. base]

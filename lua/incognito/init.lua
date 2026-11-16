@@ -4,7 +4,7 @@ M.config = {
     remote = "origin",
     targets = { "main", "master" },
     commit_mode = {
-        link = { "node_modules" },
+        link = {},
         lockfiles = {
             "package-lock.json",
             "npm-shrinkwrap.json",
@@ -53,6 +53,18 @@ function M.off()
 end
 function M.base()
     review().set_base()
+end
+function M.change_base()
+    review().set_base()
+end
+function M.change_head(rev, owner)
+    if rev then
+        return review().change_head(rev, owner)
+    end
+    review().set_head()
+end
+function M.range()
+    review().range()
 end
 function M.files(target)
     review().files(target)

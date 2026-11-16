@@ -17,6 +17,18 @@ local subcommands = {
     base = function()
         require("incognito").base()
     end,
+    change_base = function()
+        require("incognito").change_base()
+    end,
+    change_head = function(arg)
+        require("incognito").change_head(arg)
+    end,
+    head = function(arg)
+        require("incognito").change_head(arg)
+    end,
+    range = function()
+        require("incognito").range()
+    end,
     files = function(arg)
         require("incognito").files(arg)
     end,

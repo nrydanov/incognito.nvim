@@ -21,6 +21,7 @@ end
 local function feature_repo()
     vim.cmd("silent! %bwipeout!")
     mr.off()
+    mr.config.commit_mode.link = {}
     local dir = vim.fn.resolve(h.repo({ ["a.lua"] = "v0\n" }))
     git({ "branch", "-M", "main" }, dir)
     git({ "checkout", "-qb", "feature" }, dir)
@@ -156,11 +157,11 @@ function M.test_commit_mode_leaves_the_checkout_alone()
     h.assert_eq(mr._commit_mode(), nil)
     h.assert_eq(vim.api.nvim_get_current_buf(), user_buf, "window is back on the user's file")
     h.assert_eq(lines(user_buf), { "unsaved" })
-    h.assert_eq(vim.uv.fs_stat(worktree), nil, "worktree removed")
-    h.assert_eq(worktrees(dir), 1, "worktree unregistered")
+    assert(vim.uv.fs_stat(worktree), "Review retained")
+    h.assert_eq(worktrees(dir), 2, "Review remains registered")
 end
 
-function M.test_worktree_of_a_dead_session_is_removed()
+function M.test_unowned_worktree_of_a_dead_session_is_kept()
     local dir = feature_repo()
     local prefix = enter(dir):gsub("%d+$", "")
     mr.off()
@@ -172,8 +173,8 @@ function M.test_worktree_of_a_dead_session_is_removed()
     git({ "worktree", "add", "--quiet", "--detach", stale, "HEAD" }, dir)
 
     enter(dir)
-    h.assert_eq(vim.uv.fs_stat(stale), nil, "stale worktree removed")
-    h.assert_eq(worktrees(dir), 2, "only the user's checkout and the live worktree")
+    assert(vim.uv.fs_stat(stale), "unowned worktree retained")
+    h.assert_eq(worktrees(dir), 3, "unowned stale worktree is not garbage-collected")
     mr.off()
 end
 
@@ -215,18 +216,18 @@ function M.test_off_moves_window_when_commit_file_is_missing_from_checkout()
     mr.off()
     h.assert_eq(vim.api.nvim_buf_get_name(0), "", "window falls back to an empty buffer")
     h.assert_eq(lines(), { "" })
-    h.assert_eq(vim.uv.fs_stat(worktree), nil, "worktree removed")
+    assert(vim.uv.fs_stat(worktree), "Review retained")
 end
 
-function M.test_commit_buffers_with_unsaved_edits_block_stepping()
+function M.test_commit_buffers_with_unsaved_edits_are_discarded_on_real_step()
     local dir = feature_repo()
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
     enter(dir)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { "edited" })
 
     mr.step_commit(1)
-    h.assert_eq(mr._commit_mode().index, 1, "stays on the commit")
-    h.assert_eq(lines(), { "edited" })
+    h.assert_eq(mr._commit_mode().index, 2, "moves without a save dialog")
+    h.assert_eq(lines(), { "v2" })
     mr.off()
 end
 
@@ -249,6 +250,7 @@ end
 
 function M.test_ignored_dependencies_are_linked_and_survive()
     local dir = feature_repo()
+    mr.config.commit_mode.link = { "node_modules" }
     h.write(dir, ".gitignore", "node_modules/\n")
     commit(dir, "packages/a/index.js", "x\n", "package")
     h.write(dir, "node_modules/dep/index.js", "dep\n")
@@ -272,6 +274,7 @@ end
 
 function M.test_lockfile_drift_warns_while_dependencies_are_linked()
     local dir = feature_repo()
+    mr.config.commit_mode.link = { "node_modules" }
     commit(dir, ".gitignore", "node_modules/\n", "ignore")
     commit(dir, "package-lock.json", "{}\n", "lock")
     h.write(dir, "node_modules/dep/index.js", "dep\n")
@@ -281,8 +284,8 @@ function M.test_lockfile_drift_warns_while_dependencies_are_linked()
         mr._enter_commit_mode(dir, commits, 1)
     end)
     local warns = warnings(messages)
-    h.assert_eq(#warns, 1, "commit 1 predates the lockfile")
-    assert(warns[1].msg:find("package-lock.json", 1, true), warns[1].msg)
+    h.assert_eq(#warns, 2, "opt-in isolation warning and lockfile drift")
+    assert(warns[2].msg:find("package-lock.json", 1, true), warns[2].msg)
 
     messages = capture_notify(function()
         mr.step_commit(#commits - 1)
