@@ -8,6 +8,7 @@ CONTENTS                                                     *incognito*
   3. Configuration ........................... |incognito-config|
   4. Highlights .............................. |incognito-highlights|
   5. Limitations ............................. |incognito-limitations|
+  6. Development ............................. |incognito-development|
 
 ==============================================================================
 1. INTRODUCTION                                              *incognito-intro*
@@ -99,6 +100,7 @@ Reopening the same R resumes its previous N and disk/index without reset.
         targets = { "main", "master" },
         keymaps = { prefix = "<leader>i" }, -- false disables defaults
         commit_mode = {
+            -- Default: <git-common-dir>/incognito/<branch>-<hash>
             -- worktree_dir = "/absolute/canonical/path/to/reviews",
             link = {},
             lockfiles = { "package-lock.json", "npm-shrinkwrap.json",
@@ -134,9 +136,43 @@ depth, that are symlinked into the commit mode worktree. When a commit's
 `commit_mode.lockfiles` differ from your checkout, a warning says that the
 linked dependencies may not fit it. Default link={} avoids shared dependency
 writes. Opt-in links are NOT isolated: an external write can change Source.
-The plugin refuses opening/writing through Review links. The worktree_dir
-parent defaults to a sibling <canonical-Source>.incognito; changing it does
-not move existing experiments.
+The plugin refuses opening/writing through Review links.
+
+WORKTREE LOCATION                                           *incognito-worktrees*
+
+New Reviews live in <git-common-dir>/incognito/<branch>-<hash>, normally
+.git/incognito/feature-name-a1b2c3d4e5f6/. Branch names are sanitized and
+shortened; the hash distinguishes owners with similar names. Git's own
+.git/worktrees/ remains reserved for administrative files. Review files under
+.git cannot be staged in Source, and no sibling directories are created.
+Linked Source worktrees use the repository's common Git directory.
+
+commit_mode.worktree_dir selects a custom parent with hash-only names. It
+must be a canonical, non-symlink path outside any checkout and Git metadata,
+except for <git-common-dir>/incognito. Changing it does not move or delete
+existing experiments. With no custom directory, recognized Reviews at earlier
+defaults (<Source>.incognito/<hash> or stdpath("data")/incognito/worktrees/<hash>)
+are reopened in place. Unknown directories are never adopted or removed.
+
+Use `git worktree list` to find Review paths. The editor's cwd does not change;
+start agents, builds and Git explicitly in the appropriate Review directory.
+
+HUNK NAVIGATION                                             *incognito-navigation*
+
+Structural mode replaces gitsigns marks. To make ]g/[g follow the active mode,
+add these mappings to your gitsigns on_attach callback: >lua
+    on_attach = function(bufnr)
+        local gs = require("gitsigns")
+        local sd = require("incognito.structdiff")
+        for key, dir in pairs({ ["]g"] = "next", ["[g"] = "prev" }) do
+            vim.keymap.set("n", key, function()
+                if sd.active() then sd.nav(dir) else gs.nav_hunk(dir) end
+            end, { buffer = bufnr, desc = dir .. " hunk" })
+        end
+    end,
+<
+The default <leader>id and <leader>iw toggle deleted lines and the base pane
+in structural mode. See |incognito-keymaps| for the remaining defaults.
 
 ==============================================================================
 4. HIGHLIGHTS                                                *incognito-highlights*
@@ -181,5 +217,28 @@ Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 - No Codex context, agent launcher, build runner, amend/rebase/apply. Run those
   tools manually in Review; commands in Source are not silently redirected.
 - No forge integration.
+
+==============================================================================
+6. DEVELOPMENT                                              *incognito-development*
+
+With Neovim, difft and StyLua on PATH, and dependencies installed under
+$INCOGNITO_DEPS (default: stdpath("data")/lazy): >sh
+    make test
+    make lint
+    git diff --check
+    # Run only the editable-review tests:
+    SPEC=tests.editable_spec make test
+<
+Tests use temporary Git repositories and child Neovim processes. They cover
+exit/crash recovery, persistence, exclusive ownership and review transitions;
+they never run a user-project build. On macOS, use a canonical temporary path
+(for example TMPDIR=/private/tmp) to avoid symlink ancestors in path checks.
+
+For a manual check, use a disposable repository with two feature commits.
+Choose head, select the older commit, edit/write a file, inspect files/range,
+then turn review off and reopen the same head: saved edits should remain.
+Step to another commit only when ready to discard them. Confirm Source
+HEAD/index/files/cwd are unchanged, and later tracked files disappear on the
+older commit. Test loss of unsaved edits only in the disposable repository.
 
  vim:tw=78:ts=8:ft=help:norl:
