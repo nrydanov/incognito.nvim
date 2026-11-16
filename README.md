@@ -47,6 +47,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
         { "<leader>gd", function() require("incognito").structural() end, desc = "MR review on (structural)" },
         { "<leader>gM", function() require("incognito").off() end, desc = "MR review off" },
         { "<leader>gb", function() require("incognito").base() end, desc = "MR review base" },
+        { "<leader>gh", function() require("incognito").change_head() end, desc = "MR review head" },
         { "<leader>gf", function() require("incognito").files() end, desc = "MR changed files" },
         { "<leader>gk", function() require("incognito").commits() end, desc = "MR commits" },
         { "]C", function() require("incognito").next_commit() end, desc = "MR next commit" },
@@ -95,7 +96,9 @@ require("gitsigns").setup({
 | `on`         | Review against the merge-base with the target (gitsigns signs) |
 | `structural` | Same, with difftastic signs                                    |
 | `off`        | Leave review mode, restore gitsigns                            |
-| `base`       | Pick the target branch; typed text is taken as a revision      |
+| `base` / `change_base` | Pick the left target (not the computed merge-base L) |
+| `head` / `change_head [rev]` | Pick a branch, Git expression or SHA as head R |
+| `range`      | Read-only clean L → R preview, without experimental edits      |
 | `files`      | Picker of changed files with reviewed marks                    |
 | `commits`    | Picker of MR commits; selecting one enters commit mode         |
 | `next`       | Next commit in commit mode                                     |
@@ -118,9 +121,10 @@ require("incognito").setup({
     remote = "origin",               -- remote whose HEAD names the target
     targets = { "main", "master" },  -- fallback target names
     commit_mode = {
-        -- Ignored directories of your checkout, at any depth, symlinked
-        -- into the commit mode worktree so an LSP finds the dependencies.
-        link = { "node_modules" },
+        -- Default parent: <canonical-source-path>.incognito, beside Source.
+        -- worktree_dir = "/absolute/canonical/path/to/reviews",
+        -- Optional shared dependencies: NOT a sandbox; external writes hit Source.
+        link = {},
         -- A commit whose lockfiles differ from your checkout gets a warning:
         -- the linked dependencies may not fit it.
         lockfiles = { "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml",
@@ -147,36 +151,147 @@ require("incognito").setup({
 Line signs in structural mode reuse the `GitSignsAdd`, `GitSignsChange` and
 `GitSignsDelete` groups.
 
-## How it works
+## Mental model and editable review
 
-The review base is `git merge-base HEAD <target>`, where the target is
-`<remote>/HEAD` or the first existing name from `targets`. gitsigns is pointed
-at that base with `change_base`. Reviewed marks and the chosen target are
-kept in a JSON state file in the git common directory, so they
-are shared between worktrees and are not tracked by git. In structural mode
-each buffer is compared with its base version by `difft --display=json`, and
-the chunks are turned into signs, inline highlights and virtual lines.
+Start in **Source**, your ordinary checkout. Ask five questions: which range,
+which commit, which files am I editing, what is the diff base, and what survives
+my next action? No GitLab connection is needed.
+
+- **target** is the left revision chosen with `base` / `change_base`.
+- **L** is `merge-base(target, R)`, not necessarily target itself.
+- **R** is the pinned full SHA chosen with `head` / `change_head`. It defaults
+  to Source HEAD, independently of **N**, the inspected commit. Later external
+  movement of a branch does not silently move R; choose the head again to refresh.
+- **Review** is one persistent detached worktree per common repository and
+  owner branch. Choosing a branch owns its Review; an expression or SHA uses
+  the current Source branch as owner. Detached Source prompts for an owner.
+  The Lua API also accepts `change_head(rev, owner)` explicitly. Choosing an
+  owner does not check out that branch in Source.
+- **N** is selected with `commits` / `next` / `prev`; physical Review HEAD is N.
+  Source HEAD, index and process cwd do not change. Initially N is R; reopening
+  the same R resumes the last N and its disk/index, not a fresh checkout.
+
+Try `:Incognito change_head`, search a branch or a full/abbreviated SHA, or
+enter a Git expression with no matching row, such as `HEAD~2`. The picker
+searches commits reachable from all refs, not only the previous range; an
+explicit full SHA can also address an existing unreachable commit. Invalid or
+ambiguous input is rejected unchanged, never normalized or guessed. A chosen
+row disambiguates the search. `Head~X` is not silently rewritten to `HEAD~2`.
+
+The commits list is `git log --reverse L..R` (reachability, L excluded, R
+included), not an inclusive mathematical interval or a first-parent walk.
+`base` resolves revisions in Source. Changing only target/L retains the
+experiment; if N falls outside the range, this is reported and stepping asks
+you to select a listed commit or turn review off. An empty range stays empty.
+
+### What is compared
+
+On N, `files` and its preview show **first-parent(N) → N + disk edits**,
+including staged, unstaged and new non-ignored files, without secretly staging
+anything. Root commits use an empty tree. Structural signs use the current
+buffer, including unsaved text; the files picker and Git preview use disk.
+Ignored artifacts are not code-diff entries. Use `:Incognito range` for the
+separate, explicitly clean **L → R** overview; it does not aggregate experiments.
+Outside commit mode, the existing `on` / `files` view remains **Source + edits**
+against its merge-base, not a clean copy of R.
+
+`tip` opens the **real Source file**, possibly dirty, against N; editing it
+edits Source. It is not a clean R snapshot. Reviewed marks mean “read at this
+content”, not acceptance, commits or saved experiments. `since` uses the Git
+commit recorded at marking time, not a snapshot of arbitrary uncommitted text.
+Existing commands, Lua APIs and reviewed-state JSON remain supported.
+
+### What survives
+
+- A real N change, or a new R for the same owner, deliberately discards Review
+  staged/unstaged changes, non-ignored untracked files and unsaved Review text,
+  without a save dialog. Old buffer undo history is wiped; persistent undo is disabled for Review
+  buffers so an older N cannot be resurrected. **Ignored artifacts
+  remain**, so tracked code matches N but dependencies/build output may be stale.
+- Selecting the same N/R, cancelling a picker or reaching a list boundary does
+  not discard anything. Returning via `tip` does not reset Review.
+- Another owner uses its own Review and leaves the previous owner's disk alone.
+- `off` and editor exit **do not reset or delete Review** and do not autosave.
+  Modified Review buffers remain accessible after `off`; `:wqa` writes, normal
+  `:qa` uses Neovim's protection, `:qa!` or a crash can lose unsaved text.
+  Only already-written disk/index changes are promised across exit/crash.
+
+### Safety and external tools
+
+Default location is a sibling `<Source>.incognito/<repository+owner hash>`;
+`commit_mode.worktree_dir` changes the parent. It must be a canonical,
+non-symlink path outside Source. Changing this setting never migrates or deletes
+an old Review. A manifest under `<git-common-dir>/incognito-reviews/` records
+identity, Source/Review paths, target/L/R/N and transition phase. Old scratch
+worktrees and unknown directories are not adopted or garbage-collected.
+
+One Neovim holds the Review lock until exit, including after `off` or owner
+switch while old buffers can remain writable. Another editor is refused.
+After crash, only verified dead locks are reclaimed, never their Review data.
+On Linux the lock also checks boot/process-start identity to handle PID reuse;
+elsewhere a live/inaccessible PID is conservatively kept locked. An interrupted
+lock acquisition can leave a `.lock.gate` requiring manual inspection/removal
+when all owners are stopped. No background lock cleanup runs.
+
+Before a destructive transition, ownership, worktree registration and its own
+Git administrative directory, detached HEAD, index and external Git-operation
+state are verified. External HEAD movement, conflicts, rebase/cherry-pick,
+nested repositories/submodules, mounted directories, ignored/target collisions
+or unsafe link ancestors stop the operation before buffer discard. Submodule and sparse/skip-worktree/assume-unchanged transitions
+conservatively require manual Git handling. Git hooks are disabled for these
+plugin-owned workspace operations; manual Git is unaffected. A Git/FS error after
+transition starts is reported without rollback promises; the manifest retains
+an interrupted phase for manual inspection, never an automatic retry/reset.
+
+Dependency links default to `{}`. Opting into `link = { "node_modules" }`
+warns that shared dependencies are **not isolated**. Cleanup unlinks rather
+than follows links. Plugin opening/writing a Review symlink is refused before
+Neovim can canonicalize it into Source. This is not a sandbox against an
+external shell, manual Source opens, hardlinks, user autocmds or another tool
+racing filesystem mutations. Stop external writers yourself before switching N.
+External editor/agent conflicts use ordinary Neovim `checktime`/write checks;
+there is no automatic merge or force-reload of modified text.
+
+Run agents, builds and Git manually in the appropriate Review directory (the
+path is shown on entry). Commands started in Source are **not redirected**.
+There is no Codex context generator, agent launcher, build runner or built-in
+amend/rebase/apply. External commits must be anchored manually; if HEAD changes,
+the plugin stops rather than erasing them. No Source branch is rewritten.
 
 ## Limitations
 
-- difftastic's JSON output is unstable and needs `DFT_UNSTABLE=yes`; a new
-  difftastic release can change it.
-- Commit mode checks each commit out in a detached worktree under
-  `stdpath("cache")/incognito/` and opens the files from there. Ignored
-  directories listed in `commit_mode.link` are symlinked from your checkout,
-  so they hold the dependencies installed there, not the ones of the commit.
-  When the commit's lockfile differs from yours, commit mode warns that LSP
-  errors about imports and types may be false. Other untracked files (build
-  output, `.env`) are not in the worktree. The worktree is scratch: edits to its files are
-  discarded on the next step and on `off`. It is removed on `off` and when
-  Neovim exits; one left by a crashed session is removed the next time
-  commit mode starts.
-- In commit mode, `tip` opens the file of your working tree with signs
-  against the commit, so they show what changed after it. The cursor keeps
-  its line of code; a line changed later lands on what replaced it, and
-  renames are followed. Windows switched to the working tree stay there
-  when you step to another commit.
+- difftastic JSON is unstable and needs `DFT_UNSTABLE=yes` (set by the plugin).
+- Recorded review directories consume disk until you inspect/remove them
+  manually with Git while no editor owns them; `off` is not cleanup.
+- A transition is intentionally destructive, not a filesystem transaction or
+  backup. Partial errors require manual inspection of disk and manifest.
+- Ignored environment artifacts remain; a matching tracked tree does not
+  guarantee reproducible dependencies or builds.
+- Linux is covered by automated exit/crash tests; platform-specific mount and
+  symlink behavior should also be checked on the user's OS.
 - There is no forge integration.
+
+## Verification
+
+With dependencies under `$INCOGNITO_DEPS` (gitsigns.nvim, snacks.nvim and
+optionally nvim-treesitter), and Neovim/difft/StyLua on PATH:
+
+```sh
+make test
+make lint
+git diff --check
+# subset:
+SPEC=tests.editable_spec make test
+```
+
+The regression suite uses isolated temporary Git repos and child Neovim
+processes for normal exit, SIGKILL/reopen, persistence and exclusive ownership;
+it never runs a user-project build. For a manual check, use a disposable repo
+with two feature commits: choose `head`, inspect the older `commits` entry,
+edit/write a file, inspect `files` and `range`, then `off` and reopen the same
+head. The written experiment should remain. Step to another N only when ready
+to discard it; confirm Source HEAD/index/files/cwd are unchanged and late tracked
+files disappear on the older N. Test unsaved loss only in that disposable repo.
 
 ## Comparison
 

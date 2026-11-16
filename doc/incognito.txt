@@ -33,6 +33,11 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
   on          Review against the merge-base with the target.
   structural  Same, with difftastic signs.
   off         Leave review mode.
+  change_base Alias of base.
+  head / change_head [rev]
+              Choose R: a branch, Git expression (HEAD~2), or SHA search.
+              With no argument opens a picker; invalid/ambiguous input is refused.
+  range       Clean read-only L -> R overview, without experiments.
   base        Pick the target branch. Text that matches no branch is
               taken as a revision, e.g. HEAD~1 or a hash.
   files       Picker of changed files with reviewed marks (✓ reviewed,
@@ -59,7 +64,31 @@ Requirements: Neovim >= 0.11, gitsigns.nvim, snacks.nvim (pickers), `difft`
 Lua functions with the same actions: `require("incognito").on()`,
 `structural()`, `off()`, `base()`, `files()`, `commits()`, `next_commit()`,
 `prev_commit()`, `toggle_tip()`, `toggle_reviewed()`, `since_review()`,
-`nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`.
+`nav("next"|"prev")`, `toggle_deleted()`, `toggle_split()`,
+`change_base()`, `change_head([rev, owner])`, `range()`.
+
+MENTAL MODEL AND DIFF
+
+Source is the ordinary checkout controlling the review. target is the left
+revision; L=merge-base(target,R). R is a pinned full SHA, independent of N, the
+inspected commit. Review is the detached worktree physically on N. Choose R
+with change_head; choose N with commits/next/prev. External branch movement
+never silently moves R. The list is git log --reverse L..R, not an inclusive
+interval or first-parent walk. Empty ranges remain empty. Changing only base
+retains N/edits; N outside the new range is reported, not reset automatically.
+
+Commit files/preview compare first-parent(N) -> N+disk edits, including new
+non-ignored files without staging; root commits use an empty tree. Structural
+signs use current buffer text, including unsaved edits; Git previews use disk.
+Range is a separate clean L -> R view, not an accumulation of experiments.
+Outside commit mode the old view is Source+edits, not a clean R snapshot.
+Tip opens the real possibly-dirty Source file: edits there change Source.
+Reviewed means content was read, not accepted/committed/snapshotted. Since uses
+its recorded Git commit, not a backup of arbitrary local edits.
+
+Metadata: <git-common-dir>/incognito-reviews/*.json records ownership, paths,
+target/L/R/N and transition phase, separately from existing reviewed marks.
+Reopening the same R resumes its previous N and disk/index without reset.
 
 ==============================================================================
 3. CONFIGURATION                                             *incognito-config*
@@ -69,7 +98,8 @@ Lua functions with the same actions: `require("incognito").on()`,
         remote = "origin",
         targets = { "main", "master" },
         commit_mode = {
-            link = { "node_modules" },
+            -- worktree_dir = "/absolute/canonical/path/to/reviews",
+            link = {},
             lockfiles = { "package-lock.json", "npm-shrinkwrap.json",
                 "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb" },
         },
@@ -79,7 +109,11 @@ Lua functions with the same actions: `require("incognito").on()`,
 `commit_mode.link` names ignored directories of your checkout, at any
 depth, that are symlinked into the commit mode worktree. When a commit's
 `commit_mode.lockfiles` differ from your checkout, a warning says that the
-linked dependencies may not fit it.
+linked dependencies may not fit it. Default link={} avoids shared dependency
+writes. Opt-in links are NOT isolated: an external write can change Source.
+The plugin refuses opening/writing through Review links. The worktree_dir
+parent defaults to a sibling <canonical-Source>.incognito; changing it does
+not move existing experiments.
 
 ==============================================================================
 4. HIGHLIGHTS                                                *incognito-highlights*
@@ -95,10 +129,34 @@ Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 5. LIMITATIONS                                               *incognito-limitations*
 
 - difftastic JSON output is unstable and needs `DFT_UNSTABLE=yes`.
-- Commit mode works in a detached worktree under `stdpath("cache")`.
-  Only the directories in `commit_mode.link` are brought over (as symlinks
-  to your checkout), and edits to its files are discarded on the next step
-  and on `off`.
+- Review is persistent, not scratch. Off/exit never remove/reset its disk.
+  There is no autosave. :wqa writes; :qa protects modified buffers; :qa! and
+  crash can lose unsaved memory. Off leaves modified Review buffers accessible.
+- A real N transition/new R for the same owner discards staged, unstaged,
+  non-ignored untracked files and unsaved Review buffers/undo without a dialog.
+  Ignored artifacts survive, so the environment is not reproducibly clean.
+  Review buffers disable persistent undo; old N history cannot reload later.
+  Same N/R, cancelled pickers and list boundaries do not discard anything.
+- One Review per repository+owner branch. Branch head selections own Review;
+  revision/SHA selections use the Source branch. Detached Source requires an
+  explicit owner (picker or Lua change_head(rev, owner)). Another owner keeps
+  its previous disk. Source HEAD/index/cwd are not switched.
+- One editor owns Review until exit (also after off while writable buffers
+  remain). Dead locks can be reclaimed without deleting data; inaccessible
+  processes stay locked. Linux verifies boot/start identity as well as PID.
+  A stale .lock.gate needs manual inspection when all owners are stopped.
+- Ownership, canonical paths and Review's own administrative Git directory are
+  checked before reset. Unknown paths/old scratch worktrees are never deleted.
+  External HEAD movement, unmerged index, external Git operations, nested Git,
+  submodules/mounts, sparse/skip-worktree/assume-unchanged state or ignored-target
+  collisions require manual handling. Plugin workspace Git hooks are disabled.
+  Partial Git/FS failures have no rollback guarantee: inspect the manifest and
+  files manually; the next entry will not reset an interrupted transition.
+- No shell sandbox: manual Source opens, hardlinks, external writers and user
+  autocmds are outside these guards. Stop agents before changing N. There is
+  no automatic merge of agent/editor changes or force-reload of modified text.
+- No Codex context, agent launcher, build runner, amend/rebase/apply. Run those
+  tools manually in Review; commands in Source are not silently redirected.
 - No forge integration.
 
  vim:tw=78:ts=8:ft=help:norl:
