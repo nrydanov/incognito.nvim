@@ -3,6 +3,7 @@ local M = {}
 M.config = {
     remote = "origin",
     targets = { "main", "master" },
+    keymaps = { prefix = "<leader>i" },
     commit_mode = {
         link = {},
         lockfiles = {
@@ -40,6 +41,7 @@ function M.setup(opts)
             end
         end
     end
+    require("incognito.keymaps").setup(c.keymaps)
 end
 
 function M.on(target)
