@@ -423,12 +423,12 @@ local function link_ignored(root, worktree)
     for _, line in ipairs(vim.split(out, "\0", { trimempty = true })) do
         local rel = line:gsub("/$", "")
         local dest = vim.fs.joinpath(worktree, rel)
+        local source = vim.fs.joinpath(root, rel)
         if
             names[vim.fs.basename(rel)]
             and vim.uv.fs_realpath(vim.fs.dirname(dest)) == vim.fs.dirname(dest)
             and vim.uv.fs_stat(vim.fs.dirname(dest))
-            and not vim.uv.fs_lstat(dest)
-            and vim.uv.fs_symlink(vim.fs.joinpath(root, rel), dest)
+            and (vim.uv.fs_readlink(dest) == source or (not vim.uv.fs_lstat(dest) and vim.uv.fs_symlink(source, dest)))
         then
             linked[#linked + 1] = rel
         end
@@ -565,6 +565,17 @@ local function show_commit(index, range, selected)
     if not commit then
         return false
     end
+    if commit.sha ~= mode.ws.data.N then
+        for _, buf in ipairs(buffers_in(mode.worktree)) do
+            if vim.bo[buf].modified then
+                vim.notify(
+                    "Incognito: save unsaved Review edits with :w before switching: " .. vim.api.nvim_buf_get_name(buf),
+                    vim.log.levels.WARN
+                )
+                return false
+            end
+        end
+    end
     local windows
     local ok, err = workspace.transition(mode.ws, commit.sha, range or mode.range, function()
         windows = discard_buffers(mode.worktree)
@@ -599,6 +610,9 @@ local function show_commit(index, range, selected)
             mode.worktree
         )
     )
+    if err then
+        vim.notify("Incognito: " .. err, vim.log.levels.WARN)
+    end
     local drift = #mode.linked > 0 and lockfile_drift(mode.root, commit.sha) or {}
     if #drift > 0 then
         vim.notify(

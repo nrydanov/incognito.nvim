@@ -64,9 +64,12 @@ Commit reviews live in `.git/incognito/<branch>-<hash>/` (the common Git directo
 for linked worktrees). They stay out of commits in the original checkout.
 Saved edits survive leaving review and restarting Neovim; there is no autosave.
 
-**Switching commits or selecting a new head commit for the same review discards
-its staged, unstaged, untracked and unsaved changes without a dialog.** Ignored
-files remain. Switching to the original checkout with `<leader>it` opens the real
+Save your review buffers with `:w` before choosing another commit in the picker.
+Incognito carries staged edits, unstaged edits and new files to the selected
+commit. If Git cannot apply everything, the picker opens the selected commit
+and reports the private stash ref holding the original edits. Run `git status`
+in the review directory to inspect the result. Ignored files stay in place.
+Switching to the original checkout with `<leader>it` opens the real
 file: edits there affect your original checkout.
 
 The editor's working directory stays unchanged. Launch agents and builds in the

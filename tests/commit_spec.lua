@@ -226,15 +226,16 @@ function M.test_off_moves_window_when_commit_file_is_missing_from_checkout()
     assert(vim.uv.fs_stat(worktree), "Review retained")
 end
 
-function M.test_commit_buffers_with_unsaved_edits_are_discarded_on_real_step()
+function M.test_commit_buffers_with_unsaved_edits_block_a_real_step()
     local dir = feature_repo()
     vim.cmd("edit! " .. vim.fn.fnameescape(vim.fs.joinpath(dir, "a.lua")))
     enter(dir)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { "edited" })
 
     mr.step_commit(1)
-    h.assert_eq(mr._commit_mode().index, 2, "moves without a save dialog")
-    h.assert_eq(lines(), { "v2" })
+    h.assert_eq(mr._commit_mode().index, 1)
+    h.assert_eq(lines(), { "edited" })
+    assert(vim.bo.modified)
     mr.off()
 end
 

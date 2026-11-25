@@ -3,13 +3,14 @@ local M = {}
 local uv = vim.uv
 local held = {}
 
-local function git(args, root)
+local function git(args, root, opts)
     local r = vim.system(
         vim.list_extend({ "git", "--no-pager", "-c", "core.hooksPath=/dev/null" }, args),
-        { cwd = root, text = not vim.tbl_contains(args, "-z") }
+        vim.tbl_extend("force", { cwd = root, text = not vim.tbl_contains(args, "-z") }, opts or {})
     ):wait()
     if r.code ~= 0 then
-        return nil, vim.trim(r.stderr or "Git failed")
+        local reason = vim.trim((r.stderr or "") .. "\n" .. (r.stdout or ""))
+        return nil, reason ~= "" and reason or ("git %s exited with %d"):format(args[1], r.code)
     end
     -- Leading/trailing whitespace belongs to NUL-delimited path names.
     local out = r.stdout
@@ -264,13 +265,73 @@ local function ignored_collision(ignored, target)
     end
 end
 
+-- Build a stash without pushing to refs/stash, which is shared with Source.
+-- Git's stash create captures both tracked trees. Like stash push -u, add a
+-- third parent for untracked files, using a temporary, initially empty index.
+local function save_stash(d)
+    local index = vim.fn.tempname()
+    local paths
+    local function run(args, opts)
+        local out, err = git(args, d.path, opts)
+        if not out then
+            error(err, 0)
+        end
+        return out
+    end
+    local function commit(tree, parents)
+        return run(vim.list_extend({
+            "-c",
+            "user.name=Incognito",
+            "-c",
+            "user.email=incognito@localhost",
+            "commit-tree",
+            tree,
+            "-m",
+            "Incognito Review edits",
+        }, parents))
+    end
+    local ok, result = pcall(function()
+        if run({ "status", "--porcelain=v1", "--untracked-files=all", "-z" }) == "" then
+            return nil
+        end
+        local stash = run({ "stash", "create", "Incognito Review edits" })
+        paths = run({ "ls-files", "--others", "--exclude-standard", "-z" })
+        if paths ~= "" then
+            local env = { GIT_INDEX_FILE = index }
+            run({ "update-index", "--add", "-z", "--stdin" }, { env = env, stdin = paths })
+            if run({ "ls-files", "-z" }, { env = env }) ~= paths then
+                error("Git could not capture every untracked Review file", 0)
+            end
+            local untracked = commit(run({ "write-tree" }, { env = env }), {})
+            local tree = run({ "rev-parse", (stash ~= "" and stash or d.N) .. "^{tree}" })
+            local staged = stash ~= "" and run({ "rev-parse", stash .. "^2" }) or commit(tree, { "-p", d.N })
+            stash = commit(tree, { "-p", d.N, "-p", staged, "-p", untracked })
+        end
+        if stash == "" then
+            return nil
+        end
+        local ref = "refs/worktree/incognito-stashes/" .. stash
+        run({ "update-ref", ref, stash })
+        return ref
+    end)
+    uv.fs_unlink(index)
+    if not ok then
+        return nil, result
+    end
+    return result, nil, paths
+end
+
 function M.transition(ws, sha, range, before_reset)
     local ok, err = M.validate(ws)
     if not ok then
         return nil, err
     end
     local d = ws.data
-    if sha == d.N and (not range or range.R == d.R) then
+    if sha == d.N then
+        if range and range.R ~= d.R then
+            d.R, d.L, d.target = range.R, range.L, range.target
+            return M.save(ws)
+        end
         return true
     end
     if git({ "rev-parse", "--verify", "--end-of-options", sha .. "^{commit}" }, d.source) ~= sha then
@@ -328,7 +389,11 @@ function M.transition(ws, sha, range, before_reset)
             p = vim.fs.dirname(p)
         end
     end
-    d.phase, d.pending = "transition", sha
+    local stash, stash_err, untracked = save_stash(d)
+    if stash_err then
+        return nil, "could not save Review edits: " .. stash_err
+    end
+    d.phase, d.pending, d.stash = "transition", sha, stash
     ok, err = M.save(ws)
     if not ok then
         return nil, err
@@ -336,22 +401,59 @@ function M.transition(ws, sha, range, before_reset)
     if before_reset then
         before_reset()
     end
-    local _, clean_err = git({ "clean", "-fd" }, d.path)
-    if clean_err then
-        return nil, "transition stopped after buffer discard: " .. clean_err
+    -- Remove just the files saved in the third parent so apply can restore them.
+    for _, rel in ipairs(vim.split(untracked or "", "\0", { trimempty = true })) do
+        local path = vim.fs.joinpath(d.path, rel)
+        local safe, why = plain_path(vim.fs.dirname(path))
+        if not safe then
+            return nil, why
+        end
+        local removed, remove_err = uv.fs_unlink(path)
+        if not removed then
+            return nil, "Review edits saved at " .. stash .. ": " .. remove_err
+        end
     end
-    local _, checkout_err = git({ "checkout", "--quiet", "--force", "--detach", sha }, d.path)
+    local _, checkout_err =
+        git({ "checkout", "--quiet", stash and "--force" or "--no-overwrite-ignore", "--detach", sha }, d.path)
     if checkout_err then
         return nil, "transition interrupted (no rollback): " .. checkout_err
     end
     if git({ "rev-parse", "HEAD" }, d.path) ~= sha or git({ "diff", "--name-only", sha }, d.path) ~= "" then
         return nil, "transition verification failed; inspect manually"
     end
-    d.N, d.phase, d.pending = sha, "ready", nil
+    local warning
+    if stash then
+        local _, apply_err = git({ "stash", "apply", "--index", stash }, d.path)
+        if apply_err and git({ "status", "--porcelain=v1", "--untracked-files=all", "-z" }, d.path) == "" then
+            -- An index patch can fail before Git starts its three-way merge.
+            -- Retry on the pristine target so conflicting edits appear in the file.
+            local _, merge_err = git({ "-c", "stash.index=false", "stash", "apply", stash }, d.path)
+            apply_err = merge_err or ("Staging could not be restored: " .. apply_err)
+        end
+        if apply_err then
+            warning = "Could not fully apply Review edits. Inspect git status in "
+                .. d.path
+                .. ". Original stash retained at "
+                .. stash
+                .. ": "
+                .. apply_err
+        end
+    end
+    d.N, d.phase, d.pending, d.stash = sha, "ready", nil, nil
     if range then
         d.R, d.L, d.target = range.R, range.L, range.target
     end
-    return M.save(ws)
+    ok, err = M.save(ws)
+    if not ok then
+        return nil, err
+    end
+    if stash and not warning then
+        local _, drop_err = git({ "update-ref", "-d", stash, vim.fs.basename(stash) }, d.path)
+        if drop_err then
+            warning = "Review edits applied; backup retained at " .. stash .. ": " .. drop_err
+        end
+    end
+    return true, warning
 end
 
 local guarded = {}
