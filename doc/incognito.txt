@@ -191,11 +191,16 @@ Line signs reuse GitSignsAdd, GitSignsChange and GitSignsDelete.
 - Review is persistent, not scratch. Off/exit never remove/reset its disk.
   There is no autosave. :wqa writes; :qa protects modified buffers; :qa! and
   crash can lose unsaved memory. Off leaves modified Review buffers accessible.
-- A real N transition/new R for the same owner discards staged, unstaged,
-  non-ignored untracked files and unsaved Review buffers/undo without a dialog.
-  Ignored artifacts survive, so the environment is not reproducibly clean.
-  Review buffers disable persistent undo; old N history cannot reload later.
-  Same N/R, cancelled pickers and list boundaries do not discard anything.
+- Switching commits within a Review carries saved edits to the selected N.
+  Save modified Review buffers with :w and repeat the selection. Incognito
+  captures the index, working files and non-ignored untracked files, then
+  applies the stash with --index on the selected commit. Ignored files remain.
+  On an apply failure, inspect git status in Review. Resolve unmerged files
+  and stage the resolutions before switching again. The warning gives the
+  private stash ref holding the original edits. In the Review directory, use
+  git stash show --include-untracked -p <ref> to inspect it. After recovery,
+  git update-ref -d <ref> releases that backup. Successful transfers clean
+  up their private ref automatically. Review buffers start with fresh undo.
 - One Review per repository+owner branch. Branch head selections own Review;
   revision/SHA selections use the Source branch. Detached Source requires an
   explicit owner (picker or Lua change_head(rev, owner)). Another owner keeps
@@ -237,8 +242,8 @@ they never run a user-project build. On macOS, use a canonical temporary path
 For a manual check, use a disposable repository with two feature commits.
 Choose head, select the older commit, edit/write a file, inspect files/range,
 then turn review off and reopen the same head: saved edits should remain.
-Step to another commit only when ready to discard them. Confirm Source
-HEAD/index/files/cwd are unchanged, and later tracked files disappear on the
-older commit. Test loss of unsaved edits only in the disposable repository.
+Pick another commit and confirm the saved edits follow it. Make an unsaved
+edit, pick the previous commit, and confirm the buffer stays open at the
+current commit. Save it and repeat the selection.
 
  vim:tw=78:ts=8:ft=help:norl:
