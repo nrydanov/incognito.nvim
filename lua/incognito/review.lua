@@ -1215,7 +1215,7 @@ function M.toggle_reviewed(target)
     -- one just did.
     local on = reviewed_status(root, target, { file })[file] ~= "✓"
     set_reviewed(root, target, { [file] = on })
-    vim.notify("Incognito: " .. file .. (on and " reviewed" or " unmarked"))
+    vim.notify("Incognito: " .. (on and "reviewed " or "unmarked ") .. vim.fs.basename(file))
 end
 
 function M.since_review(target)
