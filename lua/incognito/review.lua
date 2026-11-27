@@ -1344,6 +1344,7 @@ function M.files(target)
     -- only changed formatting are kept, but dimmed, so nothing disappears.
     local structural = require("incognito.structdiff").active()
     local semantic = {}
+    local empty_blob
 
     local function guarded_jump(p, _, action)
         for _, item in ipairs(p:selected({ fallback = true })) do
@@ -1391,21 +1392,23 @@ function M.files(target)
             local ext = structural and "--ext-diff" or "--no-ext-diff"
             local opts = structural and { env = difft_env({ DFT_DISPLAY = "inline", DFT_COLOR = "always" }) }
                 or { ft = "diff" }
-            if ctx.item.base_blob then
-                Snacks.picker.preview.cmd(
-                    { "git", "--no-pager", "--literal-pathspecs", "diff", ext, ctx.item.base_blob, "--", ctx.item.file },
-                    ctx,
-                    opts
-                )
-            elseif ctx.item.untracked then
-                Snacks.picker.preview.cmd(
-                    { "git", "--no-pager", "diff", "--no-index", ext, "--", "/dev/null", ctx.item.file },
-                    ctx,
-                    opts
-                )
-            else
-                Snacks.picker.preview.cmd({ "git", "--no-pager", "diff", ext, base, "--", ctx.item.file }, ctx, opts)
+            local from = ctx.item.base_blob or base
+            if ctx.item.untracked and not ctx.item.base_blob then
+                -- A blob-to-file diff exits successfully when the file differs.
+                if not empty_blob then
+                    local err
+                    empty_blob, err = git({ "hash-object", "-w", "--stdin" }, root, "")
+                    if not empty_blob then
+                        return ctx.preview:notify(err, "error")
+                    end
+                end
+                from = empty_blob
             end
+            Snacks.picker.preview.cmd(
+                { "git", "--no-pager", "--literal-pathspecs", "diff", ext, from, "--", ctx.item.file },
+                ctx,
+                opts
+            )
         end,
         actions = {
             jump = guarded_jump,
